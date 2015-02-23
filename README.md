@@ -1,4 +1,4 @@
-halide-magnify
-==============
+Video Phase
+===========
 
-Video magnification with Halide! A UROP project.
+Approximate local phase of a video
