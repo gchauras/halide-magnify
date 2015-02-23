@@ -27,7 +27,7 @@ void NamedWindow::showImage(Halide::Image<float> im)
 		showImage3D(im);
 		break;
 	default:
-		throw std::exception("Image must be either 2- or 3-dimensional.");
+		throw std::runtime_error("Image must be either 2- or 3-dimensional.");
 	}
 }
 

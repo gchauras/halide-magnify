@@ -6,13 +6,13 @@ using namespace Halide;
 VideoApp::VideoApp(int scaleFactor) : scaleFactor(scaleFactor), cap(0)
 {
 	if (!cap.isOpened())
-		throw std::exception("Cannot open webcam.");
+		throw std::runtime_error("Cannot open webcam.");
 }
 
 VideoApp::VideoApp(std::string filename) : scaleFactor(1), cap(filename)
 {
 	if (!cap.isOpened())
-		throw std::exception("Cannot open file.");
+		throw std::runtime_error("Cannot open file.");
 }
 
 Image<float> VideoApp::readFrame()
@@ -51,7 +51,7 @@ Image<uint8_t> VideoApp::readFrame_uint8()
 	cv::Mat frame;
 	cap >> frame;
 	if (frame.empty())
-		return Image<float>();
+		return Image<uint8_t>();
 
 	ip.set(Buffer(UInt(8), frame.channels(), frame.cols, frame.rows, 0, frame.data));
 	return convert.realize(scaleFactor * frame.cols, scaleFactor * frame.rows);

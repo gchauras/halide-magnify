@@ -10,6 +10,10 @@
 #include "filter_util.h"
 
 using namespace Halide;
+using std::vector;
+using std::string;
+using std::cerr;
+using std::endl;
 
 #pragma region Declarations
 
@@ -126,12 +130,13 @@ cv::Mat toMat_reordered(Image<float> im)
 
 int main_magnify()
 {
-	std::string filename = "C:\\Users\\Yongyi\\Documents\\Visual Studio 2013\\Projects\\HalideApps\\HalideApps\\video.avi";
-	std::string filename2 = R"(C:\Users\Yongyi\Downloads\RieszPyramidICCP2014pres\inputC.wmv)";
-	std::string filename3 = R"(C:\Users\Yongyi\Documents\MATLAB\EVM_Matlab\data\baby.avi)";
-	RieszMagnifier magnifier(3, Float(32), 5);
-	//EulerianMagnifier magnifier(app, 6, { 3.75, 7.5, 15, 30, 30, 30, 30, 30 });
-	magnifier.compileJIT(true);
+	std::string filename  = "C:/Users/Yongyi/Documents/Visual Studio 2013/Projects/HalideApps/HalideApps/video.avi";
+	std::string filename2 = "C:/Users/Yongyi/Downloads/RieszPyramidICCP2014pres/inputC.wmv";
+	std::string filename3 = "C:/Users/Yongyi/Documents/MATLAB/EVM_Matlab/data/baby.avi";
+	std::string filename4 = "baby.avi";
+
+	RieszMagnifier magnifier(3, type_of<float>(), 5);
+    magnifier.compileJIT(true);
 
 	std::vector<double> filterA;
 	std::vector<double> filterB;
@@ -285,9 +290,9 @@ cv::Mat correctGamma(cv::Mat& img, double gamma) {
 	return result;
 }
 
-int _tmain(int argc, TCHAR* argv[])
+int main(int argc, char* argv[])
 {
-	if (argc >= 2 && argv[1] == std::wstring(L"-c"))
+	if (argc >= 2 && argv[1] == std::string("-c"))
 	{
 		RieszMagnifier(1, UInt(8), 7).compileToFile("magnify", true, parse_target_string("arm-64-android"));
 	}

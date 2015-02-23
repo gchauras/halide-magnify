@@ -160,7 +160,8 @@ inline Halide::Func clipToEdges(Halide::Func f, Halide::Expr width, Halide::Expr
 
 // Extern function to copy data to an external circular buffer of images.
 // p is the offset in the third dimension to copy to (for circular buffers). Set to 0 if unused.
-extern "C" __declspec(dllexport) int copyFloat32(int bufferType, int p, buffer_t* copyTo, buffer_t* in, buffer_t* out);
+// extern "C" __declspec(dllexport) int copyFloat32(int bufferType, int p, buffer_t* copyTo, buffer_t* in, buffer_t* out);
+extern "C" int copyFloat32(int bufferType, int p, buffer_t* copyTo, buffer_t* in, buffer_t* out);
 
 std::vector<Halide::Func> makeFuncArray(int pyramidLevels, std::string name);
 

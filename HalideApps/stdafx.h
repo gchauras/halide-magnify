@@ -9,7 +9,6 @@
 
 #define _USE_MATH_DEFINES
 
-#include <tchar.h>
 #include <array>
 #include <iostream>
 #include <iomanip>
