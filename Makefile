@@ -6,13 +6,21 @@ MKDIR := mkdir -p
 RM	  := rm -f
 CXX	  := g++ -std=c++11
 
-BUILD_DIR  := _build
+BUILD_DIR  := build
 SRC_DIR	   := HalideApps
 
 HALIDE_DIR ?= $(HOME)/Projects/halide/
 HALIDE_LIB := $(HALIDE_DIR)/bin/libHalide.a
 
-SRC := $(wildcard $(SRC_DIR)/*.cpp)
+SRC := $(SRC_DIR)/EulerianMagnifier.cpp \
+	   $(SRC_DIR)/HalideApps.cpp \
+	   $(SRC_DIR)/NamedWindow.cpp \
+	   $(SRC_DIR)/RieszMagnifier.cpp \
+	   $(SRC_DIR)/Util.cpp \
+	   $(SRC_DIR)/VideoApp.cpp \
+	   $(SRC_DIR)/filter_util.cpp \
+	   $(SRC_DIR)/stdafx.cpp
+
 OBJ := $(addprefix $(BUILD_DIR)/,$(notdir $(SRC:.cpp=.o)))
 INC := $(wildcard *.h)
 

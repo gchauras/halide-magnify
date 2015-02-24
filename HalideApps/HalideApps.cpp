@@ -128,13 +128,8 @@ cv::Mat toMat_reordered(Image<float> im)
 
 #pragma endregion
 
-int main_magnify()
+int main_magnify(string filename="")
 {
-	std::string filename  = "C:/Users/Yongyi/Documents/Visual Studio 2013/Projects/HalideApps/HalideApps/video.avi";
-	std::string filename2 = "C:/Users/Yongyi/Downloads/RieszPyramidICCP2014pres/inputC.wmv";
-	std::string filename3 = "C:/Users/Yongyi/Documents/MATLAB/EVM_Matlab/data/baby.avi";
-	std::string filename4 = "baby.avi";
-
 	RieszMagnifier magnifier(3, type_of<float>(), 5);
     magnifier.compileJIT(true);
 
@@ -146,24 +141,29 @@ int main_magnify()
 	double freqWidth = .5;
 	filter_util::computeFilter(fps, freqCenter, freqWidth, filterA, filterB);
 
-	VideoApp app;
+    std::shared_ptr<VideoApp> app;
+    if (!filename.empty()) {
+        app.reset(new VideoApp(filename));
+    } else {
+        app.reset(new VideoApp);
+    }
 
 	std::vector<Image<float>> historyBuffer;
 	for (int i = 0; i < magnifier.getPyramidLevels(); i++)
-		historyBuffer.push_back(Image<float>(scaleSize(app.width(), i), scaleSize(app.height(), i), 7, 2));
+		historyBuffer.push_back(Image<float>(scaleSize(app->width(), i), scaleSize(app->height(), i), 7, 2));
 	magnifier.bindJIT((float)filterA[1], (float)filterA[2], (float)filterB[0], (float)filterB[1], (float)filterB[2], alpha, historyBuffer);
 
 	NamedWindow inputWindow("Input"), resultWindow("Result");
 	inputWindow.move(0, 0);
-	resultWindow.move(app.width() + 10, 0);
+	resultWindow.move(app->width() + 10, 0);
 	Image<float> frame;
-	Image<float> out(app.width(), app.height(), app.channels());
+	Image<float> out(app->width(), app->height(), app->channels());
 	double timeSum = 0;
 	int frameCounter = -10;
 	int pressedKey;
 	for (int i = 0;; i++, frameCounter++)
 	{
-		frame = app.readFrame();
+		frame = app->readFrame();
 		if (frame.dimensions() == 0)
 		{
 			cv::waitKey();
@@ -259,44 +259,22 @@ int main_synthetic()
 	return 0;
 }
 
-int webcam_control()
-{
-	NamedWindow window;
-	cv::VideoCapture cap(0);
-
-	while (true)
-	{
-		cv::Mat frame;
-		cap >> frame;
-		window.showImage(frame);
-		if (cv::waitKey(30) >= 0)
-			break;
-	}
-
-	return 0;
-}
-
-cv::Mat correctGamma(cv::Mat& img, double gamma) {
-	double inverse_gamma = 1.0 / gamma;
-
-	cv::Mat lut_matrix(1, 256, CV_8UC1);
-	uchar * ptr = lut_matrix.ptr();
-	for (int i = 0; i < 256; i++)
-		ptr[i] = (int)(pow((double)i / 255.0, inverse_gamma) * 255.0);
-
-	cv::Mat result;
-	LUT(img, lut_matrix, result);
-
-	return result;
-}
-
 int main(int argc, char* argv[])
 {
 	if (argc >= 2 && argv[1] == std::string("-c"))
 	{
 		RieszMagnifier(1, UInt(8), 7).compileToFile("magnify", true, parse_target_string("arm-64-android"));
 	}
-	else
+    else if (argc >= 3 && argv[1] == std::string("-i"))
+	{
+        // std::string filename  = "C:/Users/Yongyi/Documents/Visual Studio 2013/Projects/HalideApps/HalideApps/video.avi";
+        // std::string filename2 = "C:/Users/Yongyi/Downloads/RieszPyramidICCP2014pres/inputC.wmv";
+        // std::string filename3 = "C:/Users/Yongyi/Documents/MATLAB/EVM_Matlab/data/baby.avi";
+        // std::string filename4 = "baby.avi";
+        string filename = argv[2];
+		return main_magnify(filename);
+	}
+    else
 	{
 		return main_magnify();
 	}
