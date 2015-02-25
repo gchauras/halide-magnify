@@ -4,12 +4,12 @@
 
 MKDIR := mkdir -p
 RM	  := rm -f
-CXX	  := g++ -std=c++11
+CXX	  := g++ -std=c++11 -rdynamic
 
 BUILD_DIR  := build
 SRC_DIR	   := HalideApps
 
-HALIDE_DIR ?= $(HOME)/Projects/halide/
+HALIDE_DIR ?= $(HOME)/Projects/Halide/
 HALIDE_LIB := $(HALIDE_DIR)/bin/libHalide.a
 
 SRC := $(SRC_DIR)/EulerianMagnifier.cpp \
@@ -35,7 +35,7 @@ $(APP): $(OBJ)
 	$(CXX) $(OBJ) $(HALIDE_LIB) $(LDFLAGS) -o $(APP)
 
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.cpp
-	$(MKDIR) $(BUILD_DIR)
+	@$(MKDIR) $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 clean:
