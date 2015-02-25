@@ -153,9 +153,10 @@ int main_magnify(string filename="")
 		historyBuffer.push_back(Image<float>(scaleSize(app->width(), i), scaleSize(app->height(), i), 7, 2));
 	magnifier.bindJIT((float)filterA[1], (float)filterA[2], (float)filterB[0], (float)filterB[1], (float)filterB[2], alpha, historyBuffer);
 
-	NamedWindow inputWindow("Input"), resultWindow("Result");
+	NamedWindow inputWindow("Input");
+	NamedWindow resultWindow("Result");
 	inputWindow.move(0, 0);
-	resultWindow.move(app->width() + 10, 0);
+	resultWindow.move(10,10);
 	Image<float> frame;
 	Image<float> out(app->width(), app->height(), app->channels());
 	double timeSum = 0;
@@ -176,7 +177,7 @@ int main_magnify(string filename="")
 		//std::cout << out(175, 226) << std::endl;
 		// --- end timing ---
 		double diff = currentTime() - t;
-		inputWindow.showImage(frame);
+		//inputWindow.showImage(frame);
 		resultWindow.showImage(out);
 		std::cout << diff << " ms";
 
@@ -199,7 +200,6 @@ int main_magnify(string filename="")
 			std::cout << std::endl;
 		}
 		if ((pressedKey = cv::waitKey(30)) >= 0) {
-			std::cout << pressedKey << std::endl;
 			if (pressedKey == 45)	// minus
 			{
 				freqCenter = std::max(freqWidth, freqCenter - 0.5);
@@ -217,7 +217,15 @@ int main_magnify(string filename="")
 			else if (pressedKey == 97)	// a
 			{
 				// Increase alpha
+				alpha -= 10;
+				std::cout << "Alpha is now " << alpha << std::endl;
+				magnifier.bindJIT((float)filterA[1], (float)filterA[2], (float)filterB[0], (float)filterB[1], (float)filterB[2], alpha, historyBuffer);
+			}
+            else if (pressedKey == 65)	// A
+			{
+				// Decrease alpha
 				alpha += 10;
+				std::cout << "Alpha is now " << alpha << std::endl;
 				magnifier.bindJIT((float)filterA[1], (float)filterA[2], (float)filterB[0], (float)filterB[1], (float)filterB[2], alpha, historyBuffer);
 			}
 			else if (pressedKey == 27)
@@ -228,54 +236,11 @@ int main_magnify(string filename="")
 	return 0;
 }
 
-int main_synthetic()
-{
-	const int N = 100, WIDTH = 256, HEIGHT = 256;
-
-	Param<float> tParam;
-	Func gen;
-	Expr distSquared = (x - WIDTH / 2 - 0.1f * sin(0.2f * tParam))*(x - WIDTH / 2 - 0.1f * sin(0.2f * tParam)) + (y - HEIGHT / 2)*(y - HEIGHT / 2);
-	gen(x, y) = select(distSquared <= WIDTH * WIDTH / 16, 1.0f, select(distSquared <= WIDTH * WIDTH / 16 + 100, 0.5f, 0.0f));
-	Image<float> in[N];
-	for (int i = 0; i < N; i++)
-	{
-		tParam.set((float)i);
-		in[i] = gen.realize(WIDTH, HEIGHT);
-	}
-
-	cv::VideoWriter writer("video.avi", -1, 60.0, { WIDTH, HEIGHT });
-	for (int i = 0; i < N; i++)
-		writer.write(toMat2d(in[i]));
-	writer.release();
-
-	//NamedWindow window("Input");
-	//for (int i = 0;; i++)
-	//{
-	//	window.showImage(in[i % N]);
-	//	if (cv::waitKey(20) >= 0)
-	//		break;
-	//}
-
-	return 0;
-}
-
-int main(int argc, char* argv[])
-{
-	if (argc >= 2 && argv[1] == std::string("-c"))
-	{
-		RieszMagnifier(1, UInt(8), 7).compileToFile("magnify", true, parse_target_string("arm-64-android"));
-	}
-    else if (argc >= 3 && argv[1] == std::string("-i"))
-	{
-        // std::string filename  = "C:/Users/Yongyi/Documents/Visual Studio 2013/Projects/HalideApps/HalideApps/video.avi";
-        // std::string filename2 = "C:/Users/Yongyi/Downloads/RieszPyramidICCP2014pres/inputC.wmv";
-        // std::string filename3 = "C:/Users/Yongyi/Documents/MATLAB/EVM_Matlab/data/baby.avi";
-        // std::string filename4 = "baby.avi";
-        string filename = argv[2];
-		return main_magnify(filename);
-	}
-    else
-	{
-		return main_magnify();
-	}
+int main(int argc, char** argv) {
+    if (argc>=2)	{
+        return main_magnify(argv[1]);
+	} else {
+        return main_magnify();
+    }
+    return EXIT_SUCCESS;
 }

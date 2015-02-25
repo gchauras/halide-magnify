@@ -13,7 +13,8 @@ RieszMagnifier::RieszMagnifier(int channels, Halide::Type type, int pyramidLevel
 {
 	if (channels != 1 && channels != 3)
 		throw std::invalid_argument("Channels must be either 1 or 3.");
-	if (type != UInt(8) && type != Float(32))
+
+    if (type != UInt(8) && type != Float(32))
 		throw std::invalid_argument("Only UInt(8) and Float(32) types are supported.");
 
 	// Initialize pyramid buffer params
@@ -23,12 +24,15 @@ RieszMagnifier::RieszMagnifier(int channels, Halide::Type type, int pyramidLevel
 	// Initialize spatial regularization sigmas
 	computeBandSigmas();
 
+    // Input frame conversion to float
 	input = ImageParam(type, channels == 3 ? 3 : 2, "input");
 	Func floatInput("floatInput");
 	if (type == UInt(8))
 		floatInput(_) = cast<float>(input(_)) / 255.0f;
 	else
 		floatInput(_) = input(_);
+
+    // RGB to YCbCr conversion
 	Func grey("grey");
 	Func cb("cb"), cr("cr");
 	if (channels == 3)
@@ -227,8 +231,12 @@ RieszMagnifier::RieszMagnifier(int channels, Halide::Type type, int pyramidLevel
 			c == 0, outGPyramid[0](x, y) + 1.402f * cr(x, y),
 			c == 1, outGPyramid[0](x, y) - 0.34414f * cb(x, y) - 0.71414f * cr(x, y),
 			outGPyramid[0](x, y) + 1.772f * cb(x, y)), 0.0f, 1.0f);
-		output(x, y, c) = type == UInt(8) ? cast<uint8_t>(floatOutput(x, y, c) * 255.0f) : floatOutput(x, y, c);
+
+       // floatOutput(x, y, c) = 10.0f * amp[0](x,y);
+
+        output(x, y, c) = type == UInt(8) ? cast<uint8_t>(floatOutput(x, y, c) * 255.0f) : floatOutput(x, y, c);
 	}
+
 }
 
 void RieszMagnifier::schedule(bool tile, Halide::Target target)
