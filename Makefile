@@ -4,7 +4,7 @@
 
 MKDIR := mkdir -p
 RM	  := rm -f
-CXX	  := g++ -std=c++11
+CXX	  := g++ -std=c++11 -rdynamic
 
 BUILD_DIR  := build
 SRC_DIR	   := HalideApps
