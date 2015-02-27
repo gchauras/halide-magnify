@@ -106,3 +106,23 @@ Func gaussianBlurY(Func in, float sigma)
 {
 	return convolve(in, transpose(horiGaussKernel(sigma)), "gaussianBlurY");
 }
+
+// Intensity to heat map
+Halide::Expr interpolate(Halide::Expr val, float y0, float x0, float y1, float x1) {
+    return ((val-x0)*(y1-y0)/(x1-x0) + y0);
+}
+Halide::Expr base(Halide::Expr val) {
+    return select(val <=-0.75f, 0.0f,
+           select(val <=-0.25f, interpolate(val, 0.0f, -0.75f, 1.0f, -0.25f),
+           select(val <= 0.25f, 1.0f,
+           select(val <= 0.75f, interpolate(val, 1.0f, 0.25f, 0.0f, 0.75f), 0.0f))));
+}
+Halide::Expr colormapR(Halide::Expr gray) { return base(gray-0.5f); }
+Halide::Expr colormapG(Halide::Expr gray) { return base(gray);     }
+Halide::Expr colormapB(Halide::Expr gray) { return base(gray+0.5f); }
+Halide::Tuple colormapBGR(Halide::Expr gray) {
+    return Tuple(colormapB(gray),colormapG(gray),colormapR(gray));
+}
+Halide::Tuple colormapRGB(Halide::Expr gray) {
+    return Tuple(colormapR(gray),colormapG(gray),colormapB(gray));
+}

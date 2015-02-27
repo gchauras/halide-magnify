@@ -15,7 +15,7 @@ using std::string;
 using std::cerr;
 using std::endl;
 
-#pragma region Declarations
+// #pragma region Declarations
 
 Var x("x"), y("y"), c("c"), w("w");
 
@@ -35,9 +35,9 @@ template<typename F0>
 double printTiming(F0 f, std::string message = "", int iterations = 1)
 {
 	if (!message.empty())
-		std::cout << message << std::flush;
+		cerr << message << std::flush;
 	double t = timing(f, iterations);
-	std::cout << t << " ms" << std::endl;
+	cerr << t << " ms" << endl;
 	return t;
 }
 
@@ -126,7 +126,7 @@ cv::Mat toMat_reordered(Image<float> im)
 	return mat;
 }
 
-#pragma endregion
+// #pragma endregion
 
 int main_magnify(string filename="")
 {
@@ -135,7 +135,7 @@ int main_magnify(string filename="")
 
 	std::vector<double> filterA;
 	std::vector<double> filterB;
-	float alpha = 30.0f;
+	float alpha = 0.0f;
 	double fps = 30.0;
 	double freqCenter = 2;
 	double freqWidth = .5;
@@ -153,93 +153,91 @@ int main_magnify(string filename="")
 		historyBuffer.push_back(Image<float>(scaleSize(app->width(), i), scaleSize(app->height(), i), 7, 2));
 	magnifier.bindJIT((float)filterA[1], (float)filterA[2], (float)filterB[0], (float)filterB[1], (float)filterB[2], alpha, historyBuffer);
 
-	NamedWindow inputWindow("Input");
 	NamedWindow resultWindow("Result");
-	inputWindow.move(0, 0);
 	resultWindow.move(10,10);
 	Image<float> frame;
 	Image<float> out(app->width(), app->height(), app->channels());
-	double timeSum = 0;
-	int frameCounter = -10;
+
+    bool paused = false;
+    double timeSum = 0;
+    int frameCounter = -10;
 	int pressedKey;
-	for (int i = 0;; i++, frameCounter++)
-	{
-		frame = app->readFrame();
-		if (frame.dimensions() == 0)
-		{
-			cv::waitKey();
-			break;
-		}
 
-		double t = currentTime();
-		// --- timing ---
-		magnifier.process(frame, out);
-		//std::cout << out(175, 226) << std::endl;
-		// --- end timing ---
-		double diff = currentTime() - t;
-		//inputWindow.showImage(frame);
-		resultWindow.showImage(out);
-		std::cout << diff << " ms";
+	for (int i=0;; i++, frameCounter++) {
+        if (!paused) {
+            frame = app->readFrame();
+            if (frame.dimensions() == 0) {
+                return EXIT_SUCCESS;
+            }
 
-		if (frameCounter >= 0)
-		{
-			timeSum += diff / 1000.0;
-			fps = (frameCounter + 1) / timeSum;
-			std::cout << "\t(" << fps << " FPS)"
-				<< "\t(" << 1000 / fps << " ms)" << std::endl;
+            double t = currentTime();
+            magnifier.process(frame, out);
+            double diff = currentTime() - t;
 
-			if (frameCounter % 10 == 0)
-			{
-				// Update fps
-				filter_util::computeFilter(fps, freqCenter, freqWidth, filterA, filterB);
-				magnifier.bindJIT((float)filterA[1], (float)filterA[2], (float)filterB[0], (float)filterB[1], (float)filterB[2], alpha, historyBuffer);
-			}
-		}
-		else
-		{
-			std::cout << std::endl;
-		}
-		if ((pressedKey = cv::waitKey(30)) >= 0) {
-			if (pressedKey == 45)	// minus
-			{
-				freqCenter = std::max(freqWidth, freqCenter - 0.5);
-				std::cout << "Freq center is now " << freqCenter << std::endl;
-				filter_util::computeFilter(fps, freqCenter, freqWidth, filterA, filterB);
-				magnifier.bindJIT((float)filterA[1], (float)filterA[2], (float)filterB[0], (float)filterB[1], (float)filterB[2], alpha, historyBuffer);
-			}
-			else if (pressedKey == 43)	// plus
-			{
-				freqCenter += 0.5;
-				std::cout << "Freq center is now " << freqCenter << std::endl;
-				filter_util::computeFilter(fps, freqCenter, freqWidth, filterA, filterB);
-				magnifier.bindJIT((float)filterA[1], (float)filterA[2], (float)filterB[0], (float)filterB[1], (float)filterB[2], alpha, historyBuffer);
-			}
-			else if (pressedKey == 97)	// a
-			{
-				// Increase alpha
-				alpha -= 10;
-				std::cout << "Alpha is now " << alpha << std::endl;
-				magnifier.bindJIT((float)filterA[1], (float)filterA[2], (float)filterB[0], (float)filterB[1], (float)filterB[2], alpha, historyBuffer);
-			}
-            else if (pressedKey == 65)	// A
-			{
-				// Decrease alpha
-				alpha += 10;
-				std::cout << "Alpha is now " << alpha << std::endl;
-				magnifier.bindJIT((float)filterA[1], (float)filterA[2], (float)filterB[0], (float)filterB[1], (float)filterB[2], alpha, historyBuffer);
-			}
-			else if (pressedKey == 27)
-				break;
-		}
-	}
+            resultWindow.showImage(out);
+            cerr << diff << " ms";
 
-	return 0;
+            if (frameCounter >= 0) {
+                timeSum += diff / 1000.0;
+                fps = (frameCounter + 1) / timeSum;
+                cerr << "\t(" << fps << " FPS)"
+                    << "\t(" << 1000 / fps << " ms)" << endl;
+
+                // Update fps
+                if (frameCounter % 10 == 0) {
+                    filter_util::computeFilter(fps, freqCenter, freqWidth, filterA, filterB);
+                    magnifier.bindJIT((float)filterA[1], (float)filterA[2], (float)filterB[0], (float)filterB[1], (float)filterB[2], alpha, historyBuffer);
+                }
+            }
+            else {
+                cerr << endl;
+            }
+        }
+
+        if ((pressedKey = cv::waitKey(30)) >= 0) {
+            if (pressedKey == 45)	// minus
+            {
+                freqCenter = std::max(freqWidth, freqCenter - 0.5);
+                cerr << "Freq center is now " << freqCenter << endl;
+                filter_util::computeFilter(fps, freqCenter, freqWidth, filterA, filterB);
+                magnifier.bindJIT((float)filterA[1], (float)filterA[2], (float)filterB[0], (float)filterB[1], (float)filterB[2], alpha, historyBuffer);
+            }
+            else if (pressedKey == 43)	// plus
+            {
+                freqCenter += 0.5;
+                cerr << "Freq center is now " << freqCenter << endl;
+                filter_util::computeFilter(fps, freqCenter, freqWidth, filterA, filterB);
+                magnifier.bindJIT((float)filterA[1], (float)filterA[2], (float)filterB[0], (float)filterB[1], (float)filterB[2], alpha, historyBuffer);
+            }
+            else if (pressedKey == 97)	// a: decrease alpha
+            {
+                // Increase alpha
+                alpha -= 10;
+                cerr << "Alpha is now " << alpha << endl;
+                magnifier.bindJIT((float)filterA[1], (float)filterA[2], (float)filterB[0], (float)filterB[1], (float)filterB[2], alpha, historyBuffer);
+            }
+            else if (pressedKey == 65)	// A: increase alpha
+            {
+                alpha += 10;
+                cerr << "Alpha is now " << alpha << endl;
+                magnifier.bindJIT((float)filterA[1], (float)filterA[2], (float)filterB[0], (float)filterB[1], (float)filterB[2], alpha, historyBuffer);
+            }
+            else if (pressedKey == 32) {
+                paused = !paused;
+            }
+            else if (pressedKey == 27) {
+                break;
+            }
+        }
+    }
+
+    return EXIT_SUCCESS;
 }
 
 int main(int argc, char** argv) {
-    if (argc>=2)	{
+    if (argc>=2) {
         return main_magnify(argv[1]);
-	} else {
+    } else {
         return main_magnify();
     }
     return EXIT_SUCCESS;

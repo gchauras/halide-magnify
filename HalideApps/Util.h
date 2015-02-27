@@ -173,3 +173,6 @@ std::vector<Halide::Func> copyPyramidToCircularBuffer(int pyramidLevels, const s
 
 Halide::Func gaussianBlurX(Halide::Func in, float sigma);
 Halide::Func gaussianBlurY(Halide::Func in, float sigma);
+
+Halide::Tuple colormapRGB(Halide::Expr gray);
+Halide::Tuple colormapBGR(Halide::Expr gray);
