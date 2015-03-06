@@ -17,8 +17,7 @@ VideoApp::VideoApp(std::string filename) : scaleFactor(1), cap(filename)
     }
 }
 
-Image<float> VideoApp::readFrame()
-{
+Image<float> VideoApp::readFrame(float position) {
 	static Func convert("convertFromMat");
 	static ImageParam ip(UInt(8), 3);
 	static Var x("x"), y("y"), c("c");
@@ -29,15 +28,25 @@ Image<float> VideoApp::readFrame()
 	}
 
 	cv::Mat frame;
-	cap >> frame;
-	if (frame.empty()) {
-        cap.set(CV_CAP_PROP_POS_FRAMES, 0);
+
+    if (position<0.0f || position>1.0f) {
         cap >> frame;
         if (frame.empty()) {
-            return Image<float>();
+            cap.set(CV_CAP_PROP_POS_FRAMES, 0);
+            cap >> frame;
+            if (frame.empty()) {
+                return Image<float>();
+            }
         }
+    } else {
+        float num_frames = cap.get(CV_CAP_PROP_FRAME_COUNT);
+        float curr_frame = cap.get(CV_CAP_PROP_POS_FRAMES);
+        float seek_frame = floor(num_frames*position);
+        cap.set(CV_CAP_PROP_POS_FRAMES, seek_frame);
+        cap >> frame;
+        cap.set(CV_CAP_PROP_POS_FRAMES, curr_frame);
     }
 
 	ip.set(Buffer(UInt(8), frame.channels(), frame.cols, frame.rows, 0, frame.data));
-	return convert.realize(scaleFactor * frame.cols, scaleFactor * frame.rows, frame.channels());
+	return convert.realize(scaleFactor*frame.cols, scaleFactor*frame.rows, frame.channels());
 }

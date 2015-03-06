@@ -10,6 +10,13 @@ using std::endl;
 
 #define EPSILON 1e-14f
 
+static Var x("x");
+static Var y("y");
+static Var xi("xi");
+static Var yi("yi");
+static Var c("c");
+static Var p("p");
+
 RieszMagnifier::RieszMagnifier(int channels, Halide::Type type, int pyramidLevels) :
     bandSigma(vector<float>(pyramidLevels)),
     channels(channels),
@@ -34,6 +41,7 @@ RieszMagnifier::RieszMagnifier(int channels, Halide::Type type, int pyramidLevel
 	// Initialize pyramid buffer params
 	for (int j=0; j<pyramidLevels; j++) {
 		historyBuffer.push_back(ImageParam(type_of<float>(), 4, "historyBuffer" + std::to_string(j)));
+		amplitudeBuffer.push_back(ImageParam(type_of<float>(), 2, "amplitudeBuffer" + std::to_string(j)));
     }
 
 	// Initialize spatial regularization sigmas
@@ -61,7 +69,6 @@ RieszMagnifier::RieszMagnifier(int channels, Halide::Type type, int pyramidLevel
 
 	// Gaussian pyramid: implemented as separable X and Y Gaussian blurs
     // base level set to input image
-    // Gaussian
 	gPyramidDownX   = makeFuncArray(pyramidLevels+1, "gPyramidDownX");
 	gPyramid        = makeFuncArray(pyramidLevels+1, "gPyramid");
 
@@ -86,22 +93,30 @@ RieszMagnifier::RieszMagnifier(int channels, Halide::Type type, int pyramidLevel
 		clampedPyramidBuffer[j](x,y, p) = clipToEdges(historyBuffer[j])(x,y, 0, p);
 	}
 
-	// R1 and R2 pyramid
-	r1Pyramid   = makeFuncArray(pyramidLevels, "r1Pyramid");        // R1 pyramid
-	r1Prev      = makeFuncArray(pyramidLevels, "r1Prev");           // R1 pyramid of prev frame
-	r2Pyramid   = makeFuncArray(pyramidLevels, "r2Pyramid");        // R2 pyramid
-	r2Prev      = makeFuncArray(pyramidLevels, "r2Prev");           // R2 pyramid of prev frame
+	// Amplitude, R1 and R2 pyramid
+    amp         = makeFuncArray(pyramidLevels, "amp");         // Amplitude
+    amp_orig    = makeFuncArray(pyramidLevels, "amp_orig");    // Amplitude
+	r1Pyramid   = makeFuncArray(pyramidLevels, "r1Pyramid");   // R1 pyramid
+	r2Pyramid   = makeFuncArray(pyramidLevels, "r2Pyramid");   // R2 pyramid
+	r1Prev      = makeFuncArray(pyramidLevels, "r1Prev");      // R1 pyramid of prev frame
+	r2Prev      = makeFuncArray(pyramidLevels, "r2Prev");      // R2 pyramid of prev frame
 
     // computation of R1 and R2 pyramids
     for (int j=0; j<pyramidLevels; j++) {
-		Func clampedr1 = clipToEdges(lPyramid[j], scaleSize(input.width(), j), scaleSize(input.height(), j));
-		Func clampedr2 = clipToEdges(lPyramid[j], scaleSize(input.width(), j), scaleSize(input.height(), j));
+        Func clampedr1 = clipToEdges(lPyramid[j], scaleSize(input.width(), j), scaleSize(input.height(), j));
+        Func clampedr2 = clipToEdges(lPyramid[j], scaleSize(input.width(), j), scaleSize(input.height(), j));
 
-        r1Pyramid[j](x,y) = -0.6f*clampedr1(x-1, y) + 0.6f*clampedr1(x+1, y);
-		r2Pyramid[j](x,y) = -0.6f*clampedr2(x,y-1) + 0.6f*clampedr2(x,y+1);
+        Func r1Pyramid_orig, r2Pyramid_orig;
+        r1Pyramid_orig(x,y) = 0.6f*(clampedr1(x+1,y) - clampedr1(x-1,y));
+        r2Pyramid_orig(x,y) = 0.6f*(clampedr2(x,y+1) - clampedr2(x,y-1));
+        amp_orig[j](x,y)    = hypot(lPyramid[j](x,y), hypot(r1Pyramid_orig(x,y), r2Pyramid_orig(x,y))) + EPSILON;
 
-        r1Prev[j](x,y) = -0.6f*clampedPyramidBuffer[j](x-1, y, (pParam+1)%2) + 0.6f*clampedPyramidBuffer[j](x+1, y, (pParam+1)%2);
-		r2Prev[j](x,y) = -0.6f*clampedPyramidBuffer[j](x,y-1, (pParam+1)%2) + 0.6f*clampedPyramidBuffer[j](x,y+1, (pParam+1)%2);
+        amp      [j](x,y) = amplitudeBuffer[j](x,y);
+        r1Pyramid[j](x,y) = r1Pyramid_orig(x,y) * (amp[j](x,y) / amp_orig[j](x,y));
+        r2Pyramid[j](x,y) = r2Pyramid_orig(x,y) * (amp[j](x,y) / amp_orig[j](x,y));
+
+        r1Prev[j](x,y) = 0.6f*(clampedPyramidBuffer[j](x+1,y, (pParam+1)%2) - clampedPyramidBuffer[j](x-1,y, (pParam+1)%2));
+		r2Prev[j](x,y) = 0.6f*(clampedPyramidBuffer[j](x,y+1, (pParam+1)%2) - clampedPyramidBuffer[j](x,y-1, (pParam+1)%2));
 	}
 
 	// quaternionic phase difference as a tuple
@@ -114,30 +129,30 @@ RieszMagnifier::RieszMagnifier(int channels, Halide::Type type, int pyramidLevel
 	qPhaseDiffC = makeFuncArray(pyramidLevels, "qPhaseDiffC");
 	qPhaseDiffS = makeFuncArray(pyramidLevels, "qPhaseDiffS");
 
+    // computation of r x r_prev^-1 = r x r_prev_conjugate
+    // cos(phi) = (r x r_prev^-1) / ||r x r_prev||
+    // phi = phi_m - phi_prev
+    // qPhaseDiffC = phi - phi_prev * cos(theta);
+    // qPhaseDiffS = phi - phi_prev * sin(theta);
 	for (int j=0; j<pyramidLevels; j++) {
-		// q x q_prev*
-		productReal[j](x,y) = lPyramidCopy[j](x,y) * historyBuffer[j](x,y, 0, (pParam + 1) % 2)
-			+ r1Pyramid[j](x,y) * r1Prev[j](x,y)
-			+ r2Pyramid[j](x,y) * r2Prev[j](x,y);
-		productI[j](x,y) = r1Pyramid[j](x,y) * historyBuffer[j](x,y, 0, (pParam + 1) % 2)
-			- r1Prev[j](x,y) * lPyramid[j](x,y);
-		productJ[j](x,y) = r2Pyramid[j](x,y) * historyBuffer[j](x,y, 0, (pParam + 1) % 2)
-			- r2Prev[j](x,y) * lPyramid[j](x,y);
+		productReal[j](x,y) = lPyramidCopy[j](x,y) * historyBuffer[j](x,y, 0, (pParam+1)%2) + r1Pyramid[j](x,y) * r1Prev[j](x,y) + r2Pyramid[j](x,y) * r2Prev[j](x,y);
+		productI[j](x,y)    = r1Pyramid[j](x,y)    * historyBuffer[j](x,y, 0, (pParam+1)%2) - r1Prev[j](x,y) * lPyramid[j](x,y);
+		productJ[j](x,y)    = r2Pyramid[j](x,y)    * historyBuffer[j](x,y, 0, (pParam+1)%2) - r2Prev[j](x,y) * lPyramid[j](x,y);
 
 		ijAmplitude[j](x,y) = hypot(productI[j](x,y), productJ[j](x,y)) + EPSILON;
 		amplitude[j](x,y) = hypot(ijAmplitude[j](x,y), productReal[j](x,y)) + EPSILON;
 
-		// cos(phi) = q x q_prev^-1 = q x q_prev* / ||q * q_prev||
 		phi[j](x,y) = acos(productReal[j](x,y) / amplitude[j](x,y)) / ijAmplitude[j](x,y);
 
 		qPhaseDiffC[j](x,y) = productI[j](x,y) * phi[j](x,y);
 		qPhaseDiffS[j](x,y) = productJ[j](x,y) * phi[j](x,y);
 	}
 
-	// Cumulative sums
+	// Cumulative sums on phi to give
+    // qPhaseC = cumsum(phi - phi_prev) * cos(theta);
+    // qPhaseS = cumsum(phi - phi_prev) * sin(theta);
 	phaseC = makeFuncArray(pyramidLevels, "phaseC");
 	phaseS = makeFuncArray(pyramidLevels, "phaseS");
-
     for (int j=0; j<pyramidLevels; j++) {
 		phaseC[j](x,y) = qPhaseDiffC[j](x,y) + historyBuffer[j](x,y, 1, (pParam + 1) % 2);
 		phaseS[j](x,y) = qPhaseDiffS[j](x,y) + historyBuffer[j](x,y, 2, (pParam + 1) % 2);
@@ -153,13 +168,14 @@ RieszMagnifier::RieszMagnifier(int channels, Halide::Type type, int pyramidLevel
 	lowpass1S   = makeFuncArray(pyramidLevels, "lowpass1S");
 	lowpass2S   = makeFuncArray(pyramidLevels, "lowpass2S");
 
+    // temporal filtering of unwrapped phase
+    // Linear filter. Order of evaluation here is important.
 	for (int j=0; j<pyramidLevels; j++) {
-		// Linear filter. Order of evaluation here is important.
-		changeC[j](x,y) = b0 * phaseCCopy[j](x,y) + historyBuffer[j](x,y, 3, (pParam + 1) % 2);
+		changeC[j](x,y)   = b0 * phaseCCopy[j](x,y) + historyBuffer[j](x,y, 3, (pParam + 1) % 2);
 		lowpass1C[j](x,y) = b1 * phaseCCopy[j](x,y) + historyBuffer[j](x,y, 4, (pParam + 1) % 2) - a1 * changeC[j](x,y);
 		lowpass2C[j](x,y) = b2 * phaseCCopy[j](x,y) - a2 * changeC[j](x,y);
 
-		changeS[j](x,y) = b0 * phaseSCopy[j](x,y) + historyBuffer[j](x,y, 5, (pParam + 1) % 2);
+		changeS[j](x,y)   = b0 * phaseSCopy[j](x,y) + historyBuffer[j](x,y, 5, (pParam + 1) % 2);
 		lowpass1S[j](x,y) = b1 * phaseSCopy[j](x,y) + historyBuffer[j](x,y, 6, (pParam + 1) % 2) - a1 * changeS[j](x,y);
 		lowpass2S[j](x,y) = b2 * phaseSCopy[j](x,y) - a2 * changeS[j](x,y);
 	}
@@ -174,7 +190,6 @@ RieszMagnifier::RieszMagnifier(int channels, Halide::Type type, int pyramidLevel
 	changeC2      = makeFuncArray(pyramidLevels, "changeC2");
 	changeS2      = makeFuncArray(pyramidLevels, "changeS2");
 
-    amp           = makeFuncArray(pyramidLevels, "amp");
 	changeCAmp    = makeFuncArray(pyramidLevels, "changeCAmp");
 	changeCRegX   = makeFuncArray(pyramidLevels, "changeCRegX");
 	changeCReg    = makeFuncArray(pyramidLevels, "changeCReg");
@@ -188,7 +203,6 @@ RieszMagnifier::RieszMagnifier(int channels, Halide::Type type, int pyramidLevel
 	outLPyramid   = makeFuncArray(pyramidLevels, "outLPyramid");
 
 	for (int j=0; j<pyramidLevels; j++) {
-
         //
         changeCTuple[j](x,y) = { changeC[j](x,y), lowpass1CCopy[j](x,y), lowpass2CCopy[j](x,y) };
 		changeSTuple[j](x,y) = { changeS[j](x,y), lowpass1SCopy[j](x,y), lowpass2SCopy[j](x,y) };
@@ -196,13 +210,8 @@ RieszMagnifier::RieszMagnifier(int channels, Halide::Type type, int pyramidLevel
 		changeS2[j](x,y) = changeSTuple[j](x,y)[0];
 
 
-        //
+        // spatial Gaussian blur
 		float sigma = bandSigma[j];
-
-		amp[j](x,y) = sqrt(
-                lPyramid[j](x,y) * lPyramid[j](x,y) +
-                r1Pyramid[j](x,y) * r1Pyramid[j](x,y) +
-                r2Pyramid[j](x,y) * r2Pyramid[j](x,y)) + EPSILON;
 
 		ampRegX[j](x,y) = gaussianBlurX(clipToEdges(amp[j], scaleSize(input.width(), j), scaleSize(input.height(), j)), sigma)(x,y);
 		ampReg[j](x,y) = gaussianBlurY(ampRegX[j], sigma)(x,y);
@@ -219,6 +228,7 @@ RieszMagnifier::RieszMagnifier(int channels, Halide::Type type, int pyramidLevel
 		Expr sreg = (sigma == 0.0f ? changeS2[j](x,y) : changeSReg[j](x,y));
 		magC[j](x,y) = hypot(creg, sreg) + EPSILON;
 
+        // magnifying
 		pair[j](x,y) = (r1Pyramid[j](x,y) * creg + r2Pyramid[j](x,y) * sreg) / magC[j](x,y);
 		outLPyramid[j](x,y) = lPyramid[j](x,y)*cos(alpha*magC[j](x,y)) - pair[j](x,y)*sin(alpha*magC[j](x,y));
 	}
@@ -233,37 +243,115 @@ RieszMagnifier::RieszMagnifier(int channels, Halide::Type type, int pyramidLevel
 	}
 
 
+#if 1
     // YCrCb -> RGB
-    //floatOutput(x,y, c) = clamp(select(
-    //	c == 0, outGPyramid[0](x,y) + 1.402f * cr(x,y),
-    //	c == 1, outGPyramid[0](x,y) - 0.34414f * cb(x,y) - 0.71414f * cr(x,y),
-    //	outGPyramid[0](x,y) + 1.772f * cb(x,y)), 0.0f, 1.0f);
-    //
-    //output(x,y,c) = (type==type_of<unsigned char>()
-    //        ? cast<unsigned char>(floatOutput(x,y,c)*255.0f)
-    //        : floatOutput(x,y, c));
+    floatOutput(x,y, c) = clamp(select(
+    	c == 0, outGPyramid[0](x,y) + 1.402f * cr(x,y),
+    	c == 1, outGPyramid[0](x,y) - 0.34414f * cb(x,y) - 0.71414f * cr(x,y),
+    	outGPyramid[0](x,y) + 1.772f * cb(x,y)), 0.0f, 1.0f);
 
-    Expr  val = 5.0f * amp[0](x,y);
+    output(x,y,c) = (type==type_of<unsigned char>()
+            ? cast<unsigned char>(floatOutput(x,y,c)*255.0f)
+            : floatOutput(x,y, c));
+#else
+    int level = 1;
+    Expr  val = ;
     Tuple cmap = colormapBGR(val);
 
     output(x,y,c) = select(c==0, cmap[0], select(c==1, cmap[1], cmap[2]));
+#endif
 }
 
-void RieszMagnifier::schedule(bool tile, Halide::Target target)
+void RieszMagnifier::schedule(bool tile)
 {
-	if (target.arch == Target::Arch::X86) {
-		scheduleX86(tile);
-	}
-	else if (target.arch == Target::Arch::ARM) {
-		scheduleARM(tile);
-	}
-}
+#if 1
+	int VECTOR_SIZE = 8;
+	int THREAD_SIZE = 4;
 
-void RieszMagnifier::scheduleX86(bool tile)
-{
+    output.parallel(y, 4).vectorize(x, VECTOR_SIZE).reorder(c,x,y).bound(c, 0, channels).unroll(c);
+
+	for (int j=0; j<pyramidLevels; j++) {
+        outGPyramid[j]   .compute_root();
+        outGPyramidUpX[j].compute_root();
+
+        ampReg[j]       .compute_root().split(y, y, yi, 16);
+        ampRegX[j]      .compute_at(ampReg[j], y);
+        changeCReg[j]   .compute_root().split(y, y, yi, 16);
+        changeCRegX[j]  .compute_at(changeCReg[j], y);
+        changeSReg[j]   .compute_root().split(y, y, yi, 16);
+        changeSRegX[j]  .compute_at(changeSReg[j], y);
+        amp[j]          .compute_root();
+
+        changeCTuple[j] .compute_root();
+        changeSTuple[j] .compute_root();
+
+        lowpass1CCopy[j].compute_root();
+        lowpass2CCopy[j].compute_root();
+        lowpass1SCopy[j].compute_root();
+        lowpass2SCopy[j].compute_root();
+        lowpass1C[j]    .compute_root();
+        lowpass2C[j]    .compute_root();
+        lowpass1S[j]    .compute_root();
+        lowpass2S[j]    .compute_root();
+
+        phaseCCopy[j]   .compute_root();
+        phaseSCopy[j]   .compute_root();
+        phaseC[j]       .compute_root();
+        phaseS[j]       .compute_root();
+        phi[j]          .compute_root();
+
+        r1Pyramid[j]    .compute_root();
+        r2Pyramid[j]    .compute_root();
+
+        lPyramidCopy[j] .compute_root();
+        lPyramid[j]     .compute_root().split(y, y, yi, 8);
+        lPyramidUpX[j]  .compute_at(lPyramid[j], y);
+
+		if (j>0) {
+			gPyramid[j]     .compute_root().split(y, y, yi, 8);
+			gPyramidDownX[j].compute_at(gPyramid[j], y);
+            gPyramid[j]     .parallel(y, THREAD_SIZE).vectorize(x, VECTOR_SIZE);
+            gPyramidDownX[j].parallel(y, THREAD_SIZE).vectorize(x, VECTOR_SIZE);
+		}
+
+		if (j<=4) {
+			outGPyramid[j]   .parallel(y,THREAD_SIZE).vectorize(x, VECTOR_SIZE);
+			outGPyramidUpX[j].parallel(y,THREAD_SIZE).vectorize(x, VECTOR_SIZE);
+
+			ampReg[j]       .parallel(y, THREAD_SIZE).vectorize(x, VECTOR_SIZE);
+			ampRegX[j]      .parallel(y, THREAD_SIZE).vectorize(x, VECTOR_SIZE);
+			changeCReg[j]   .parallel(y, THREAD_SIZE).vectorize(x, VECTOR_SIZE);
+			changeCRegX[j]  .parallel(y, THREAD_SIZE).vectorize(x, VECTOR_SIZE);
+			changeSReg[j]   .parallel(y, THREAD_SIZE).vectorize(x, VECTOR_SIZE);
+			changeSRegX[j]  .parallel(y, THREAD_SIZE).vectorize(x, VECTOR_SIZE);
+			amp[j]          .parallel(y, THREAD_SIZE).vectorize(x, VECTOR_SIZE);
+
+			changeCTuple[j] .parallel(y, THREAD_SIZE).vectorize(x, VECTOR_SIZE);
+			changeSTuple[j] .parallel(y, THREAD_SIZE).vectorize(x, VECTOR_SIZE);
+
+			lowpass1C[j]    .parallel(y, THREAD_SIZE).vectorize(x, VECTOR_SIZE);
+			lowpass2C[j]    .parallel(y, THREAD_SIZE).vectorize(x, VECTOR_SIZE);
+			lowpass1S[j]    .parallel(y, THREAD_SIZE).vectorize(x, VECTOR_SIZE);
+			lowpass2S[j]    .parallel(y, THREAD_SIZE).vectorize(x, VECTOR_SIZE);
+
+			phaseC[j]       .parallel(y, THREAD_SIZE).vectorize(x, VECTOR_SIZE);
+			phaseS[j]       .parallel(y, THREAD_SIZE).vectorize(x, VECTOR_SIZE);
+			phi[j]          .parallel(y, THREAD_SIZE).vectorize(x, VECTOR_SIZE);
+
+			r1Pyramid[j]    .parallel(y, THREAD_SIZE).vectorize(x, VECTOR_SIZE);
+			r2Pyramid[j]    .parallel(y, THREAD_SIZE).vectorize(x, VECTOR_SIZE);
+
+			lPyramid[j]     .parallel(y, THREAD_SIZE).vectorize(x, VECTOR_SIZE);
+			lPyramidUpX[j]  .parallel(y, THREAD_SIZE).vectorize(x, VECTOR_SIZE);
+		}
+	}
+
+	// The final level
+	gPyramid[pyramidLevels].compute_root().parallel(y, 4).vectorize(x, VECTOR_SIZE);
+#else
 	const int VECTOR_SIZE = 8;
 
-	if (channels == 3) {
+    if (channels == 3) {
 		output.reorder(c, x,y).bound(c, 0, channels).unroll(c);
     }
 	output.parallel(y, 4).vectorize(x, 4);
@@ -391,161 +479,26 @@ void RieszMagnifier::scheduleX86(bool tile)
 
 	// The final level
 	gPyramid[pyramidLevels].compute_root().parallel(y, 4).vectorize(x, VECTOR_SIZE);
+#endif
 }
 
-void RieszMagnifier::scheduleARM(bool tile)
-{
-	const int VECTOR_SIZE = 4;
-
-	if (channels == 3) {
-		output.reorder(c, x,y).bound(c, 0, channels).unroll(c);
-    }
-	output.parallel(y, 4).vectorize(x, 4);
-
-	if (tile) {
-		output.tile(x,y, xi,yi, 80,20);
-	}
-
-	for (int j=0; j<pyramidLevels; j++) {
-		if (tile) {
-			outGPyramid[j].compute_at(output, x);
-			outGPyramidUpX[j].compute_at(output, x);
-
-			ampReg[j].compute_at(output, x);
-			ampRegX[j].compute_at(output, x);
-			changeCReg[j].compute_at(output, x);
-			changeCRegX[j].compute_at(output, x);
-			changeSReg[j].compute_at(output, x);
-			changeSRegX[j].compute_at(output, x);
-			amp[j].compute_at(output, x);
-
-			changeCTuple[j].compute_at(output, x);
-			changeSTuple[j].compute_at(output, x);
-
-			lowpass1CCopy[j].compute_at(output, x);
-			lowpass2CCopy[j].compute_at(output, x);
-			lowpass1SCopy[j].compute_at(output, x);
-			lowpass2SCopy[j].compute_at(output, x);
-			lowpass1C[j].compute_at(output, x);
-			lowpass2C[j].compute_at(output, x);
-			lowpass1S[j].compute_at(output, x);
-			lowpass2S[j].compute_at(output, x);
-
-			phaseCCopy[j].compute_at(output, x);
-			phaseSCopy[j].compute_at(output, x);
-			phaseC[j].compute_at(output, x);
-			phaseS[j].compute_at(output, x);
-			phi[j].compute_at(output, x);
-
-			r1Pyramid[j].compute_at(output, x);
-			r2Pyramid[j].compute_at(output, x);
-
-			lPyramidCopy[j].compute_at(output, x);
-			lPyramid[j].compute_at(output, x);
-			lPyramidUpX[j].compute_at(output, x);
-		} else {
-			outGPyramid[j].compute_root();
-			outGPyramidUpX[j].compute_root();
-
-			ampReg[j].compute_root().split(y, y, yi, 16);
-			ampRegX[j].compute_at(ampReg[j], y);
-			changeCReg[j].compute_root().split(y, y, yi, 16);
-			changeCRegX[j].compute_at(changeCReg[j], y);
-			changeSReg[j].compute_root().split(y, y, yi, 16);
-			changeSRegX[j].compute_at(changeSReg[j], y);
-			amp[j].compute_root();
-
-			changeCTuple[j].compute_root();
-			changeSTuple[j].compute_root();
-
-			lowpass1CCopy[j].compute_root();
-			lowpass2CCopy[j].compute_root();
-			lowpass1SCopy[j].compute_root();
-			lowpass2SCopy[j].compute_root();
-			lowpass1C[j].compute_root();
-			lowpass2C[j].compute_root();
-			lowpass1S[j].compute_root();
-			lowpass2S[j].compute_root();
-
-			phaseCCopy[j].compute_root();
-			phaseSCopy[j].compute_root();
-			phaseC[j].compute_root();
-			phaseS[j].compute_root();
-			phi[j].compute_root();
-
-			r1Pyramid[j].compute_root();
-			r2Pyramid[j].compute_root();
-
-			lPyramidCopy[j].compute_root();
-			lPyramid[j].compute_root().split(y, y, yi, 8);
-			lPyramidUpX[j].compute_at(lPyramid[j], y);
-		}
-
-		if (j>0) {
-			gPyramid[j].compute_root().split(y, y, yi, 8);
-			gPyramidDownX[j].compute_at(gPyramid[j], y);
-		}
-
-		if (j<=4) {
-			outGPyramid[j].parallel(y, 4).vectorize(x, VECTOR_SIZE);
-			outGPyramidUpX[j].parallel(y, 4).vectorize(x, VECTOR_SIZE);
-
-			ampReg[j].parallel(y, 4).vectorize(x, VECTOR_SIZE);
-			ampRegX[j].parallel(y, 4).vectorize(x, VECTOR_SIZE);
-			changeCReg[j].parallel(y, 4).vectorize(x, VECTOR_SIZE);
-			changeCRegX[j].parallel(y, 4).vectorize(x, VECTOR_SIZE);
-			changeSReg[j].parallel(y, 4).vectorize(x, VECTOR_SIZE);
-			changeSRegX[j].parallel(y, 4).vectorize(x, VECTOR_SIZE);
-			amp[j].parallel(y, 4).vectorize(x, VECTOR_SIZE);
-
-			changeCTuple[j].parallel(y, 4).vectorize(x, VECTOR_SIZE);
-			changeSTuple[j].parallel(y, 4).vectorize(x, VECTOR_SIZE);
-
-			lowpass1C[j].parallel(y, 4).vectorize(x, VECTOR_SIZE);
-			lowpass2C[j].parallel(y, 4).vectorize(x, VECTOR_SIZE);
-			lowpass1S[j].parallel(y, 4).vectorize(x, VECTOR_SIZE);
-			lowpass2S[j].parallel(y, 4).vectorize(x, VECTOR_SIZE);
-
-			phaseC[j].parallel(y, 4).vectorize(x, VECTOR_SIZE);
-			phaseS[j].parallel(y, 4).vectorize(x, VECTOR_SIZE);
-			phi[j].parallel(y, 4).vectorize(x, VECTOR_SIZE);
-
-			r1Pyramid[j].parallel(y, 4).vectorize(x, VECTOR_SIZE);
-			r2Pyramid[j].parallel(y, 4).vectorize(x, VECTOR_SIZE);
-
-			lPyramid[j].parallel(y, 4).vectorize(x, VECTOR_SIZE);
-			lPyramidUpX[j].parallel(y, 4).vectorize(x, VECTOR_SIZE);
-
-			if (j>0) {
-				gPyramid[j].parallel(y, 4).vectorize(x, VECTOR_SIZE);
-				gPyramidDownX[j].parallel(y, 4).vectorize(x, VECTOR_SIZE);
-			}
-		}
-	}
-
-	// The final level
-	gPyramid[pyramidLevels].compute_root().parallel(y, 4).vectorize(x, VECTOR_SIZE);
-}
-
-void RieszMagnifier::compileJIT(bool tile, Target target)
-{
-	schedule(tile, target);
-	cerr << "Compiling JIT for target " << target.to_string() << endl;
+void RieszMagnifier::compileJIT(bool tile) {
+	Target target = get_target_from_environment();
+    schedule(tile);
+	cerr << "Compiling JIT for target " << target.to_string() << " .. ";
 	output.compile_jit();
+	cerr << " done\n" << endl;
 }
 
-void RieszMagnifier::compileToFile(std::string filenamePrefix, bool tile, Target target)
-{
-	schedule(tile, target);
-	vector<Argument> arguments{ input, a1, a2, b0, b1, b2, alpha, pParam };
-	for (int j=0; j<pyramidLevels; j++) {
-		arguments.push_back(historyBuffer[j]);
-    }
-	cerr << "Compiling to '" << filenamePrefix << "' for target " << target.to_string() << endl;
-	output.compile_to_file(filenamePrefix, arguments, target);
-}
-
-void RieszMagnifier::bindJIT(float a1, float a2, float b0, float b1, float b2, float alpha, vector<Image<float>> historyBuffer)
+void RieszMagnifier::bindJIT(
+        float a1,
+        float a2,
+        float b0,
+        float b1,
+        float b2,
+        float alpha,
+        vector<Image<float>> historyBuffer
+        )
 {
 	this->a1.set(a1);
 	this->a2.set(a2);
@@ -566,9 +519,34 @@ void RieszMagnifier::process(Buffer frame, Buffer out)
 	frameCounter++;
 }
 
-void RieszMagnifier::computeBandSigmas()
+void RieszMagnifier::compute_reference_amplitude(Buffer frame)
 {
+    int width = frame.extent(0);
+    int height= frame.extent(1);
+
+    input.set(frame);
+
+    amplitudeBuffer_img.clear();
+    for (int i=0; i<pyramidLevels; i++) {
+        amplitudeBuffer_img.push_back(Image<float>(
+                    scaleSize(width,i), scaleSize(height,i)));
+    }
+
+    cerr << "Computing reference amplitude ";
+    for (int i=0; i<pyramidLevels; i++) {
+        amp_orig[i].realize(amplitudeBuffer_img[i]);
+        amplitudeBuffer[i].set(amplitudeBuffer_img[i]);
+        cerr << ".";
+    }
+    cerr << " done" << endl;
+}
+
+void RieszMagnifier::computeBandSigmas() {
 	for (int j=0; j<pyramidLevels; j++) {
 		bandSigma[j] = 3;
 	}
+}
+
+int RieszMagnifier::getPyramidLevels() {
+    return pyramidLevels;
 }

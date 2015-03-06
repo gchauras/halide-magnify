@@ -4,18 +4,25 @@ class RieszMagnifier
 {
 public:
 	RieszMagnifier(int channels, Halide::Type type, int pyramidLevels = 5);
-	void compileJIT(bool tile, Halide::Target target = Halide::get_target_from_environment());
-	void compileToFile(std::string filenamePrefix, bool tile, Halide::Target target = Halide::get_target_from_environment());
-	void bindJIT(float a1, float a2, float b0, float b1, float b2, float alpha, std::vector<Halide::Image<float>> historyBuffer);
-	void process(Halide::Buffer frame, Halide::Buffer out);
+
+    void compileJIT(bool tile);
+    void bindJIT(
+            float a1,
+            float a2,
+            float b0,
+            float b1,
+            float b2,
+            float alpha,
+            std::vector<Halide::Image<float>> historyBuffer);
+
+    void process(Halide::Buffer frame, Halide::Buffer out);
 	void computeBandSigmas();
 
-	int getPyramidLevels() { return pyramidLevels; }
+    void compute_reference_amplitude(Halide::Buffer frame);
+	int getPyramidLevels();
 
 private:
-	void schedule(bool tile, Halide::Target target = Halide::get_target_from_environment());
-	void scheduleX86(bool tile);
-	void scheduleARM(bool tile);
+	void schedule(bool tile);
 
 	static const int CIRCBUFFER_SIZE = 2;
 	static const int NUM_BUFFER_TYPES = 7;
@@ -24,15 +31,19 @@ private:
 	std::vector<float> bandSigma;
 
 	int channels;
+
 	int pyramidLevels;
 
 	// Input params
 	Halide::ImageParam input;
-	// Filter coefficients
+
+    // Filter coefficients
 	Halide::Param<float> a1, a2, b0, b1, b2;
-	// Amplification coefficients
+
+    // Amplification coefficients
 	Halide::Param<float> alpha;
-	// 4-dimensional buffer: For each pyramid level, an image of size width x height x type x circular buffer index.
+
+    // 4D buffer: For each pyramid level, an image of size width x height x type x circular buffer index.
 	// Types:
 	// ------
 	// 0: pyramidBuffer
@@ -43,11 +54,15 @@ private:
 	// 5: lowpass1SBuffer
 	// 6: lowpass2SBuffer
 	std::vector<Halide::ImageParam> historyBuffer;
-	// Current frame modulo 2. (For circular buffer).
+
+    // reference amplitude
+    std::vector<Halide::ImageParam>   amplitudeBuffer;
+    std::vector<Halide::Image<float>> amplitudeBuffer_img;
+
+    // Current frame modulo 2. (For circular buffer).
 	Halide::Param<int> pParam;
 
 	// Funcs
-	Halide::Var x, y, c, p, xi, yi;
 	std::vector<Halide::Func>
 		gPyramidDownX,
 		gPyramid,
@@ -86,6 +101,7 @@ private:
 		changeC2,
 		changeS2,
 		amp,
+		amp_orig,
 		changeCAmp,
 		changeCRegX,
 		changeCReg,
@@ -100,7 +116,8 @@ private:
 		outGPyramidUpX,
 		outGPyramid;
 
-	Halide::Func floatOutput, output;
+	Halide::Func floatOutput;
+    Halide::Func output;
 
 	int frameCounter;
 };

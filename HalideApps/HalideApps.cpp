@@ -130,7 +130,7 @@ cv::Mat toMat_reordered(Image<float> im)
 
 int main_magnify(string filename="")
 {
-	RieszMagnifier magnifier(3, type_of<float>(), 5);
+	RieszMagnifier magnifier(3, type_of<float>(), 7);
     magnifier.compileJIT(true);
 
 	std::vector<double> filterA;
@@ -149,8 +149,15 @@ int main_magnify(string filename="")
     }
 
 	std::vector<Image<float>> historyBuffer;
-	for (int i = 0; i < magnifier.getPyramidLevels(); i++)
-		historyBuffer.push_back(Image<float>(scaleSize(app->width(), i), scaleSize(app->height(), i), 7, 2));
+	for (int i=0; i<magnifier.getPyramidLevels(); i++) {
+		historyBuffer.push_back(Image<float>(
+                    scaleSize(app->width(), i),
+                    scaleSize(app->height(), i), 7, 2));
+    }
+
+    // select a reference amplitude frame
+    magnifier.compute_reference_amplitude(app->readFrame(0.5f));
+
 	magnifier.bindJIT((float)filterA[1], (float)filterA[2], (float)filterB[0], (float)filterB[1], (float)filterB[2], alpha, historyBuffer);
 
 	NamedWindow resultWindow("Result");
@@ -180,8 +187,7 @@ int main_magnify(string filename="")
             if (frameCounter >= 0) {
                 timeSum += diff / 1000.0;
                 fps = (frameCounter + 1) / timeSum;
-                cerr << "\t(" << fps << " FPS)"
-                    << "\t(" << 1000 / fps << " ms)" << endl;
+                cerr << "\t(" << fps << " FPS)" << "\t(" << 1000 / fps << " ms)" << endl;
 
                 // Update fps
                 if (frameCounter % 10 == 0) {
@@ -211,8 +217,7 @@ int main_magnify(string filename="")
             }
             else if (pressedKey == 97)	// a: decrease alpha
             {
-                // Increase alpha
-                alpha -= 10;
+                alpha += 10;
                 cerr << "Alpha is now " << alpha << endl;
                 magnifier.bindJIT((float)filterA[1], (float)filterA[2], (float)filterB[0], (float)filterB[1], (float)filterB[2], alpha, historyBuffer);
             }

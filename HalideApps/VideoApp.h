@@ -9,9 +9,9 @@ public:
 	int width() { return scaleFactor * (int)cap.get(CV_CAP_PROP_FRAME_WIDTH); }
 	int height() { return scaleFactor * (int)cap.get(CV_CAP_PROP_FRAME_HEIGHT); }
 	int channels() const { return 3; }
-	double fps() { return cap.get(CV_CAP_PROP_FPS); }
+	float fps() { return cap.get(CV_CAP_PROP_FPS); }
 
-	Halide::Image<float> readFrame();
+	Halide::Image<float> readFrame(float position=-1.0f);
 	Halide::Image<uint8_t> readFrame_uint8();
 
 private:
