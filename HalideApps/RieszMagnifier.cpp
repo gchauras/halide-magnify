@@ -88,11 +88,6 @@ RieszMagnifier::RieszMagnifier(int channels, Halide::Type type, int pyramidLevel
 	}
 	lPyramidCopy = copyPyramidToCircularBuffer(pyramidLevels, lPyramid, historyBuffer, 0, pParam, "lPyramidCopy");
 
-	clampedPyramidBuffer = makeFuncArray(pyramidLevels, "clampedPyramidBuffer");
-	for (int j=0; j<pyramidLevels; j++) {
-		clampedPyramidBuffer[j](x,y, p) = clipToEdges(historyBuffer[j])(x,y, 0, p);
-	}
-
 	// Amplitude, R1 and R2 pyramid
     amp         = makeFuncArray(pyramidLevels, "amp");         // Amplitude
     amp_orig    = makeFuncArray(pyramidLevels, "amp_orig");    // Amplitude
@@ -103,20 +98,28 @@ RieszMagnifier::RieszMagnifier(int channels, Halide::Type type, int pyramidLevel
 
     // computation of R1 and R2 pyramids
     for (int j=0; j<pyramidLevels; j++) {
-        Func clampedr1 = clipToEdges(lPyramid[j], scaleSize(input.width(), j), scaleSize(input.height(), j));
-        Func clampedr2 = clipToEdges(lPyramid[j], scaleSize(input.width(), j), scaleSize(input.height(), j));
-
+        Func clampedLPyramid, clampedLPyramidPrev;
         Func r1Pyramid_orig, r2Pyramid_orig;
-        r1Pyramid_orig(x,y) = 0.6f*(clampedr1(x+1,y) - clampedr1(x-1,y));
-        r2Pyramid_orig(x,y) = 0.6f*(clampedr2(x,y+1) - clampedr2(x,y-1));
-        amp_orig[j](x,y)    = hypot(lPyramid[j](x,y), hypot(r1Pyramid_orig(x,y), r2Pyramid_orig(x,y))) + EPSILON;
+        Func r1Prev_orig,    r2Prev_orig, ampPrev_orig, ampPrev;
+
+        clampedLPyramid    (x,y)   = clipToEdges(lPyramid[j],scaleSize(input.width(),j), scaleSize(input.height(),j))(x,y);
+        clampedLPyramidPrev(x,y,p) = clipToEdges(historyBuffer[j])(x,y,0,p);
+
+        r1Pyramid_orig(x,y) = 0.6f*(clampedLPyramid(x+1,y) - clampedLPyramid(x-1,y));
+        r2Pyramid_orig(x,y) = 0.6f*(clampedLPyramid(x,y+1) - clampedLPyramid(x,y-1));
+        amp_orig[j](x,y)    = hypot(clampedLPyramid(x,y), hypot(r1Pyramid_orig(x,y), r2Pyramid_orig(x,y))) + EPSILON;
+
+        r1Prev_orig (x,y) = 0.6f*(clampedLPyramidPrev(x+1,y,(pParam+1)%2) - clampedLPyramidPrev(x-1,y,(pParam+1)%2));
+		r2Prev_orig (x,y) = 0.6f*(clampedLPyramidPrev(x,y+1,(pParam+1)%2) - clampedLPyramidPrev(x,y-1,(pParam+1)%2));
+        ampPrev_orig(x,y)= hypot(clampedLPyramidPrev(x,y,(pParam+1)%2), hypot(r1Prev_orig(x,y), r2Prev_orig(x,y))) + EPSILON;
 
         amp      [j](x,y) = amplitudeBuffer[j](x,y);
         r1Pyramid[j](x,y) = r1Pyramid_orig(x,y) * (amp[j](x,y) / amp_orig[j](x,y));
         r2Pyramid[j](x,y) = r2Pyramid_orig(x,y) * (amp[j](x,y) / amp_orig[j](x,y));
 
-        r1Prev[j](x,y) = 0.6f*(clampedPyramidBuffer[j](x+1,y, (pParam+1)%2) - clampedPyramidBuffer[j](x-1,y, (pParam+1)%2));
-		r2Prev[j](x,y) = 0.6f*(clampedPyramidBuffer[j](x,y+1, (pParam+1)%2) - clampedPyramidBuffer[j](x,y-1, (pParam+1)%2));
+        ampPrev(x,y)   = amplitudeBuffer[j](x,y);
+        r1Prev[j](x,y) = r1Prev_orig(x,y) * (ampPrev(x,y) / ampPrev_orig(x,y));
+		r2Prev[j](x,y) = r2Prev_orig(x,y) * (ampPrev(x,y) / ampPrev_orig(x,y));
 	}
 
 	// quaternionic phase difference as a tuple
@@ -242,7 +245,6 @@ RieszMagnifier::RieszMagnifier(int channels, Halide::Type type, int pyramidLevel
 		outGPyramid[j](x,y) = outLPyramid[j](x,y) + upsampleG5Y(outGPyramidUpX[j])(x,y);
 	}
 
-
 #if 1
     // YCrCb -> RGB
     floatOutput(x,y, c) = clamp(select(
@@ -254,8 +256,7 @@ RieszMagnifier::RieszMagnifier(int channels, Halide::Type type, int pyramidLevel
             ? cast<unsigned char>(floatOutput(x,y,c)*255.0f)
             : floatOutput(x,y, c));
 #else
-    int level = 1;
-    Expr  val = ;
+    Expr  val = amp[0](x,y);
     Tuple cmap = colormapBGR(val);
 
     output(x,y,c) = select(c==0, cmap[0], select(c==1, cmap[1], cmap[2]));

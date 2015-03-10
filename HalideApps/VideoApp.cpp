@@ -3,15 +3,13 @@
 
 using namespace Halide;
 
-VideoApp::VideoApp(int scaleFactor) : scaleFactor(scaleFactor), cap(0)
-{
+VideoApp::VideoApp(int scaleFactor, bool loop) : scaleFactor(scaleFactor), allow_looping(loop), cap(0) {
 	if (!cap.isOpened()) {
 		throw std::runtime_error("Cannot open webcam.");
     }
 }
 
-VideoApp::VideoApp(std::string filename) : scaleFactor(1), cap(filename)
-{
+VideoApp::VideoApp(std::string filename, bool loop) : scaleFactor(1), allow_looping(loop), cap(filename) {
 	if (!cap.isOpened()) {
 		throw std::runtime_error("Cannot open file.");
     }
@@ -32,8 +30,10 @@ Image<float> VideoApp::readFrame(float position) {
     if (position<0.0f || position>1.0f) {
         cap >> frame;
         if (frame.empty()) {
-            cap.set(CV_CAP_PROP_POS_FRAMES, 0);
-            cap >> frame;
+            if (allow_looping) {
+                cap.set(CV_CAP_PROP_POS_FRAMES, 0);
+                cap >> frame;
+            }
             if (frame.empty()) {
                 return Image<float>();
             }
@@ -49,4 +49,21 @@ Image<float> VideoApp::readFrame(float position) {
 
 	ip.set(Buffer(UInt(8), frame.channels(), frame.cols, frame.rows, 0, frame.data));
 	return convert.realize(scaleFactor*frame.cols, scaleFactor*frame.rows, frame.channels());
+}
+
+// -----------------------------------------------------------------------------
+
+OutVideo::OutVideo(std::string filename, float fps, int width, int height) {
+    writer.open(filename, CV_FOURCC('D','X','5','0'), fps,
+            cv::Size(width,height), true);
+    if (!writer.isOpened()) {
+		throw std::runtime_error("Cannot open video file for writing.");
+    }
+}
+
+void OutVideo::writeFrame(cv::Mat out) {
+    if (!writer.isOpened()) {
+		throw std::runtime_error("Cannot open video file for writing.");
+    }
+    writer << out;
 }
