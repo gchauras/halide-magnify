@@ -144,6 +144,7 @@ int main(int argc, char** argv) {
 
     std::shared_ptr<VideoApp> app;
     std::shared_ptr<OutVideo> result;
+    std::shared_ptr<NamedWindow> inputWindow;
     std::shared_ptr<NamedWindow> resultWindow;
 
     if (!filename.empty()) {
@@ -154,9 +155,13 @@ int main(int argc, char** argv) {
 
     // show output or write to file
     if (use_gui) {
+        inputWindow .reset(new NamedWindow("Input"));
         resultWindow.reset(new NamedWindow("Result"));
+        inputWindow->move(0,0);
+        resultWindow->move(10,10);
     } else {
-        result.reset(new OutVideo("out.avi", app->fps(), app->width(), app->height()));
+        result.reset(new OutVideo("out.avi", app->fps(), app->fourcc(),
+                    app->width(), app->height()));
     }
 
 	std::vector<Image<float>> historyBuffer;
@@ -192,7 +197,7 @@ int main(int argc, char** argv) {
             double diff = currentTime() - t;
 
             if (use_gui) {
-                resultWindow->move(10,10);
+                inputWindow->showImage(frame);
                 resultWindow->showImage(out);
             } else {
                 result->writeFrame(toMat_reordered(out));

@@ -67,6 +67,7 @@ private:
 		gPyramidDownX,
 		gPyramid,
 		lPyramidUpX,
+		lPyramid_orig,
 		lPyramid,
 		lPyramidCopy,
 		clampedPyramidBuffer,

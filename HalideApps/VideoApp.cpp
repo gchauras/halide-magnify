@@ -53,9 +53,8 @@ Image<float> VideoApp::readFrame(float position) {
 
 // -----------------------------------------------------------------------------
 
-OutVideo::OutVideo(std::string filename, float fps, int width, int height) {
-    writer.open(filename, CV_FOURCC('D','X','5','0'), fps,
-            cv::Size(width,height), true);
+OutVideo::OutVideo(std::string filename, float fps, int fourcc, int width, int height) {
+    writer.open(filename, fourcc, fps, cv::Size(width,height), true);
     if (!writer.isOpened()) {
 		throw std::runtime_error("Cannot open video file for writing.");
     }

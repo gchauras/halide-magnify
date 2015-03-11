@@ -7,6 +7,7 @@ public:
 
 	int width()     { return scaleFactor * cap.get(CV_CAP_PROP_FRAME_WIDTH); }
 	int height()    { return scaleFactor * cap.get(CV_CAP_PROP_FRAME_HEIGHT);}
+	int fourcc()    { return cap.get(CV_CAP_PROP_FOURCC); }
 	int channels()  { return 3; }
 	float fps()     { return cap.get(CV_CAP_PROP_FPS); }
 
@@ -21,7 +22,7 @@ private:
 
 class OutVideo {
 public:
-	OutVideo(std::string filename, float fps, int width, int height);
+	OutVideo(std::string filename, float fps, int fourcc, int width, int height);
 	void writeFrame(cv::Mat out);
 
 private:

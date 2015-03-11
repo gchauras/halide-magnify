@@ -80,13 +80,16 @@ RieszMagnifier::RieszMagnifier(int channels, Halide::Type type, int pyramidLevel
 
 	// Laplacian pyramid: implemented as difference of Gaussians
 	lPyramidUpX = makeFuncArray(pyramidLevels, "lPyramidUpX");
-	lPyramid    = makeFuncArray(pyramidLevels+1, "lPyramid");
-	lPyramid[pyramidLevels](x,y) = gPyramid[pyramidLevels](x,y);
-	for (int j=pyramidLevels-1; j>=0; j--) {
+	lPyramid      = makeFuncArray(pyramidLevels, "lPyramid");
+	lPyramid_orig = makeFuncArray(pyramidLevels, "lPyramid_orig");
+
+	//lPyramid_orig[pyramidLevels](x,y) = gPyramid[pyramidLevels](x,y);
+	//lPyramid[pyramidLevels](x,y) = gPyramid[pyramidLevels](x,y);
+
+    for (int j=pyramidLevels-1; j>=0; j--) {
 		lPyramidUpX[j](x,y) = upsampleG5X(clipToEdges(gPyramid[j + 1], scaleSize(input.width(), j + 1), scaleSize(input.height(), j + 1)))(x,y);
-		lPyramid[j](x,y) = gPyramid[j](x,y) - upsampleG5Y(lPyramidUpX[j])(x,y);
+		lPyramid_orig[j](x,y) = gPyramid[j](x,y) - upsampleG5Y(lPyramidUpX[j])(x,y);
 	}
-	lPyramidCopy = copyPyramidToCircularBuffer(pyramidLevels, lPyramid, historyBuffer, 0, pParam, "lPyramidCopy");
 
 	// Amplitude, R1 and R2 pyramid
     amp         = makeFuncArray(pyramidLevels, "amp");         // Amplitude
@@ -100,118 +103,112 @@ RieszMagnifier::RieszMagnifier(int channels, Halide::Type type, int pyramidLevel
     for (int j=0; j<pyramidLevels; j++) {
         Func clampedLPyramid, clampedLPyramidPrev;
         Func r1Pyramid_orig, r2Pyramid_orig;
-        Func r1Prev_orig,    r2Prev_orig, ampPrev_orig, ampPrev;
 
-        clampedLPyramid    (x,y)   = clipToEdges(lPyramid[j],scaleSize(input.width(),j), scaleSize(input.height(),j))(x,y);
-        clampedLPyramidPrev(x,y,p) = clipToEdges(historyBuffer[j])(x,y,0,p);
+        clampedLPyramid(x,y) = clipToEdges(lPyramid_orig[j],scaleSize(input.width(),j), scaleSize(input.height(),j))(x,y);
+        r1Pyramid_orig (x,y) = 0.6f*(clampedLPyramid(x+1,y) - clampedLPyramid(x-1,y));
+        r2Pyramid_orig (x,y) = 0.6f*(clampedLPyramid(x,y+1) - clampedLPyramid(x,y-1));
 
-        r1Pyramid_orig(x,y) = 0.6f*(clampedLPyramid(x+1,y) - clampedLPyramid(x-1,y));
-        r2Pyramid_orig(x,y) = 0.6f*(clampedLPyramid(x,y+1) - clampedLPyramid(x,y-1));
-        amp_orig[j](x,y)    = hypot(clampedLPyramid(x,y), hypot(r1Pyramid_orig(x,y), r2Pyramid_orig(x,y))) + EPSILON;
-
-        r1Prev_orig (x,y) = 0.6f*(clampedLPyramidPrev(x+1,y,(pParam+1)%2) - clampedLPyramidPrev(x-1,y,(pParam+1)%2));
-		r2Prev_orig (x,y) = 0.6f*(clampedLPyramidPrev(x,y+1,(pParam+1)%2) - clampedLPyramidPrev(x,y-1,(pParam+1)%2));
-        ampPrev_orig(x,y)= hypot(clampedLPyramidPrev(x,y,(pParam+1)%2), hypot(r1Prev_orig(x,y), r2Prev_orig(x,y))) + EPSILON;
-
+        amp_orig [j](x,y) = hypot(clampedLPyramid(x,y), hypot(r1Pyramid_orig(x,y), r2Pyramid_orig(x,y))) + EPSILON;
         amp      [j](x,y) = amplitudeBuffer[j](x,y);
-        r1Pyramid[j](x,y) = r1Pyramid_orig(x,y) * (amp[j](x,y) / amp_orig[j](x,y));
-        r2Pyramid[j](x,y) = r2Pyramid_orig(x,y) * (amp[j](x,y) / amp_orig[j](x,y));
+        r1Pyramid[j](x,y) = r1Pyramid_orig(x,y)  * (amp[j](x,y) / amp_orig[j](x,y));
+        r2Pyramid[j](x,y) = r2Pyramid_orig(x,y)  * (amp[j](x,y) / amp_orig[j](x,y));
+        lPyramid [j](x,y) = lPyramid_orig[j](x,y)* (amp[j](x,y) / amp_orig[j](x,y));
 
-        ampPrev(x,y)   = amplitudeBuffer[j](x,y);
-        r1Prev[j](x,y) = r1Prev_orig(x,y) * (ampPrev(x,y) / ampPrev_orig(x,y));
-		r2Prev[j](x,y) = r2Prev_orig(x,y) * (ampPrev(x,y) / ampPrev_orig(x,y));
-	}
+        clampedLPyramidPrev(x,y,p) = clipToEdges(historyBuffer[j])(x,y,0,p);
+        r1Prev[j](x,y) = 0.6f*(clampedLPyramidPrev(x+1,y,(pParam+1)%2) - clampedLPyramidPrev(x-1,y,(pParam+1)%2));
+        r2Prev[j](x,y) = 0.6f*(clampedLPyramidPrev(x,y+1,(pParam+1)%2) - clampedLPyramidPrev(x,y-1,(pParam+1)%2));
+    }
+    lPyramidCopy = copyPyramidToCircularBuffer(pyramidLevels, lPyramid, historyBuffer, 0, pParam, "lPyramidCopy");
 
-	// quaternionic phase difference as a tuple
-	productReal = makeFuncArray(pyramidLevels, "productReal");
-	productI    = makeFuncArray(pyramidLevels, "productI");
-	productJ    = makeFuncArray(pyramidLevels, "productJ");
-	ijAmplitude = makeFuncArray(pyramidLevels, "ijAmplitude");
-	amplitude   = makeFuncArray(pyramidLevels, "amplitude");
-	phi         = makeFuncArray(pyramidLevels, "phi");
-	qPhaseDiffC = makeFuncArray(pyramidLevels, "qPhaseDiffC");
-	qPhaseDiffS = makeFuncArray(pyramidLevels, "qPhaseDiffS");
+    // quaternionic phase difference as a tuple
+    productReal = makeFuncArray(pyramidLevels, "productReal");
+    productI    = makeFuncArray(pyramidLevels, "productI");
+    productJ    = makeFuncArray(pyramidLevels, "productJ");
+    ijAmplitude = makeFuncArray(pyramidLevels, "ijAmplitude");
+    amplitude   = makeFuncArray(pyramidLevels, "amplitude");
+    phi         = makeFuncArray(pyramidLevels, "phi");
+    qPhaseDiffC = makeFuncArray(pyramidLevels, "qPhaseDiffC");
+    qPhaseDiffS = makeFuncArray(pyramidLevels, "qPhaseDiffS");
 
     // computation of r x r_prev^-1 = r x r_prev_conjugate
     // cos(phi) = (r x r_prev^-1) / ||r x r_prev||
     // phi = phi_m - phi_prev
     // qPhaseDiffC = phi - phi_prev * cos(theta);
     // qPhaseDiffS = phi - phi_prev * sin(theta);
-	for (int j=0; j<pyramidLevels; j++) {
-		productReal[j](x,y) = lPyramidCopy[j](x,y) * historyBuffer[j](x,y, 0, (pParam+1)%2) + r1Pyramid[j](x,y) * r1Prev[j](x,y) + r2Pyramid[j](x,y) * r2Prev[j](x,y);
-		productI[j](x,y)    = r1Pyramid[j](x,y)    * historyBuffer[j](x,y, 0, (pParam+1)%2) - r1Prev[j](x,y) * lPyramid[j](x,y);
-		productJ[j](x,y)    = r2Pyramid[j](x,y)    * historyBuffer[j](x,y, 0, (pParam+1)%2) - r2Prev[j](x,y) * lPyramid[j](x,y);
+    for (int j=0; j<pyramidLevels; j++) {
+        productReal[j](x,y) = lPyramidCopy[j](x,y) * historyBuffer[j](x,y, 0, (pParam+1)%2) + r1Pyramid[j](x,y) * r1Prev[j](x,y) + r2Pyramid[j](x,y) * r2Prev[j](x,y);
+        productI[j](x,y)    = r1Pyramid[j](x,y)    * historyBuffer[j](x,y, 0, (pParam+1)%2) - r1Prev[j](x,y) * lPyramid[j](x,y);
+        productJ[j](x,y)    = r2Pyramid[j](x,y)    * historyBuffer[j](x,y, 0, (pParam+1)%2) - r2Prev[j](x,y) * lPyramid[j](x,y);
 
-		ijAmplitude[j](x,y) = hypot(productI[j](x,y), productJ[j](x,y)) + EPSILON;
-		amplitude[j](x,y) = hypot(ijAmplitude[j](x,y), productReal[j](x,y)) + EPSILON;
+        ijAmplitude[j](x,y) = hypot(productI[j](x,y), productJ[j](x,y)) + EPSILON;
+        amplitude[j]  (x,y) = hypot(ijAmplitude[j](x,y), productReal[j](x,y)) + EPSILON;
 
-		phi[j](x,y) = acos(productReal[j](x,y) / amplitude[j](x,y)) / ijAmplitude[j](x,y);
+        phi[j](x,y) = acos(productReal[j](x,y) / amplitude[j](x,y)) / ijAmplitude[j](x,y);
 
-		qPhaseDiffC[j](x,y) = productI[j](x,y) * phi[j](x,y);
-		qPhaseDiffS[j](x,y) = productJ[j](x,y) * phi[j](x,y);
-	}
+        qPhaseDiffC[j](x,y) = productI[j](x,y) * phi[j](x,y);
+        qPhaseDiffS[j](x,y) = productJ[j](x,y) * phi[j](x,y);
+    }
 
-	// Cumulative sums on phi to give
+    // Cumulative sums on phi to give
     // qPhaseC = cumsum(phi - phi_prev) * cos(theta);
     // qPhaseS = cumsum(phi - phi_prev) * sin(theta);
-	phaseC = makeFuncArray(pyramidLevels, "phaseC");
-	phaseS = makeFuncArray(pyramidLevels, "phaseS");
+    phaseC = makeFuncArray(pyramidLevels, "phaseC");
+    phaseS = makeFuncArray(pyramidLevels, "phaseS");
     for (int j=0; j<pyramidLevels; j++) {
-		phaseC[j](x,y) = qPhaseDiffC[j](x,y) + historyBuffer[j](x,y, 1, (pParam + 1) % 2);
-		phaseS[j](x,y) = qPhaseDiffS[j](x,y) + historyBuffer[j](x,y, 2, (pParam + 1) % 2);
-	}
+        phaseC[j](x,y) = qPhaseDiffC[j](x,y) + historyBuffer[j](x,y, 1, (pParam + 1) % 2);
+        phaseS[j](x,y) = qPhaseDiffS[j](x,y) + historyBuffer[j](x,y, 2, (pParam + 1) % 2);
+    }
 
-	phaseCCopy  = copyPyramidToCircularBuffer(pyramidLevels, phaseC, historyBuffer, 1, pParam, "phaseCCopy");
-	phaseSCopy  = copyPyramidToCircularBuffer(pyramidLevels, phaseS, historyBuffer, 2, pParam, "phaseSCopy");
+    phaseCCopy  = copyPyramidToCircularBuffer(pyramidLevels, phaseC, historyBuffer, 1, pParam, "phaseCCopy");
+    phaseSCopy  = copyPyramidToCircularBuffer(pyramidLevels, phaseS, historyBuffer, 2, pParam, "phaseSCopy");
 
-	changeC     = makeFuncArray(pyramidLevels, "changeC");
-	lowpass1C   = makeFuncArray(pyramidLevels, "lowpass1C");
-	lowpass2C   = makeFuncArray(pyramidLevels, "lowpass2C");
-	changeS     = makeFuncArray(pyramidLevels, "changeS");
-	lowpass1S   = makeFuncArray(pyramidLevels, "lowpass1S");
-	lowpass2S   = makeFuncArray(pyramidLevels, "lowpass2S");
+    changeC     = makeFuncArray(pyramidLevels, "changeC");
+    lowpass1C   = makeFuncArray(pyramidLevels, "lowpass1C");
+    lowpass2C   = makeFuncArray(pyramidLevels, "lowpass2C");
+    changeS     = makeFuncArray(pyramidLevels, "changeS");
+    lowpass1S   = makeFuncArray(pyramidLevels, "lowpass1S");
+    lowpass2S   = makeFuncArray(pyramidLevels, "lowpass2S");
 
     // temporal filtering of unwrapped phase
     // Linear filter. Order of evaluation here is important.
-	for (int j=0; j<pyramidLevels; j++) {
-		changeC[j](x,y)   = b0 * phaseCCopy[j](x,y) + historyBuffer[j](x,y, 3, (pParam + 1) % 2);
-		lowpass1C[j](x,y) = b1 * phaseCCopy[j](x,y) + historyBuffer[j](x,y, 4, (pParam + 1) % 2) - a1 * changeC[j](x,y);
-		lowpass2C[j](x,y) = b2 * phaseCCopy[j](x,y) - a2 * changeC[j](x,y);
+    for (int j=0; j<pyramidLevels; j++) {
+        changeC[j](x,y)   = b0 * phaseCCopy[j](x,y) + historyBuffer[j](x,y, 3, (pParam + 1) % 2);
+        lowpass1C[j](x,y) = b1 * phaseCCopy[j](x,y) + historyBuffer[j](x,y, 4, (pParam + 1) % 2) - a1 * changeC[j](x,y);
+        lowpass2C[j](x,y) = b2 * phaseCCopy[j](x,y) - a2 * changeC[j](x,y);
 
-		changeS[j](x,y)   = b0 * phaseSCopy[j](x,y) + historyBuffer[j](x,y, 5, (pParam + 1) % 2);
-		lowpass1S[j](x,y) = b1 * phaseSCopy[j](x,y) + historyBuffer[j](x,y, 6, (pParam + 1) % 2) - a1 * changeS[j](x,y);
-		lowpass2S[j](x,y) = b2 * phaseSCopy[j](x,y) - a2 * changeS[j](x,y);
-	}
+        changeS[j](x,y)   = b0 * phaseSCopy[j](x,y) + historyBuffer[j](x,y, 5, (pParam + 1) % 2);
+        lowpass1S[j](x,y) = b1 * phaseSCopy[j](x,y) + historyBuffer[j](x,y, 6, (pParam + 1) % 2) - a1 * changeS[j](x,y);
+        lowpass2S[j](x,y) = b2 * phaseSCopy[j](x,y) - a2 * changeS[j](x,y);
+    }
 
-	lowpass1CCopy = copyPyramidToCircularBuffer(pyramidLevels, lowpass1C, historyBuffer, 3, pParam, "lowpass1CCopy");
-	lowpass2CCopy = copyPyramidToCircularBuffer(pyramidLevels, lowpass2C, historyBuffer, 4, pParam, "lowpass2CCopy");
-	lowpass1SCopy = copyPyramidToCircularBuffer(pyramidLevels, lowpass1S, historyBuffer, 5, pParam, "lowpass1SCopy");
-	lowpass2SCopy = copyPyramidToCircularBuffer(pyramidLevels, lowpass2S, historyBuffer, 6, pParam, "lowpass2SCopy");
+    lowpass1CCopy = copyPyramidToCircularBuffer(pyramidLevels, lowpass1C, historyBuffer, 3, pParam, "lowpass1CCopy");
+    lowpass2CCopy = copyPyramidToCircularBuffer(pyramidLevels, lowpass2C, historyBuffer, 4, pParam, "lowpass2CCopy");
+    lowpass1SCopy = copyPyramidToCircularBuffer(pyramidLevels, lowpass1S, historyBuffer, 5, pParam, "lowpass1SCopy");
+    lowpass2SCopy = copyPyramidToCircularBuffer(pyramidLevels, lowpass2S, historyBuffer, 6, pParam, "lowpass2SCopy");
 
-	changeCTuple  = makeFuncArray(pyramidLevels, "changeCTuple");
-	changeSTuple  = makeFuncArray(pyramidLevels, "changeSTuple");
-	changeC2      = makeFuncArray(pyramidLevels, "changeC2");
-	changeS2      = makeFuncArray(pyramidLevels, "changeS2");
+    changeCTuple  = makeFuncArray(pyramidLevels, "changeCTuple");
+    changeSTuple  = makeFuncArray(pyramidLevels, "changeSTuple");
+    changeC2      = makeFuncArray(pyramidLevels, "changeC2");
+    changeS2      = makeFuncArray(pyramidLevels, "changeS2");
 
-	changeCAmp    = makeFuncArray(pyramidLevels, "changeCAmp");
-	changeCRegX   = makeFuncArray(pyramidLevels, "changeCRegX");
-	changeCReg    = makeFuncArray(pyramidLevels, "changeCReg");
-	changeSAmp    = makeFuncArray(pyramidLevels, "changeSAmp");
-	changeSRegX   = makeFuncArray(pyramidLevels, "changeSRegX");
-	changeSReg    = makeFuncArray(pyramidLevels, "changeSReg");
-	ampRegX       = makeFuncArray(pyramidLevels, "ampRegX");
-	ampReg        = makeFuncArray(pyramidLevels, "ampReg");
-	magC          = makeFuncArray(pyramidLevels, "magC");
-	pair          = makeFuncArray(pyramidLevels, "pair");
-	outLPyramid   = makeFuncArray(pyramidLevels, "outLPyramid");
+    changeCAmp    = makeFuncArray(pyramidLevels, "changeCAmp");
+    changeCRegX   = makeFuncArray(pyramidLevels, "changeCRegX");
+    changeCReg    = makeFuncArray(pyramidLevels, "changeCReg");
+    changeSAmp    = makeFuncArray(pyramidLevels, "changeSAmp");
+    changeSRegX   = makeFuncArray(pyramidLevels, "changeSRegX");
+    changeSReg    = makeFuncArray(pyramidLevels, "changeSReg");
+    ampRegX       = makeFuncArray(pyramidLevels, "ampRegX");
+    ampReg        = makeFuncArray(pyramidLevels, "ampReg");
+    magC          = makeFuncArray(pyramidLevels, "magC");
+    pair          = makeFuncArray(pyramidLevels, "pair");
+    outLPyramid   = makeFuncArray(pyramidLevels, "outLPyramid");
 
-	for (int j=0; j<pyramidLevels; j++) {
+    for (int j=0; j<pyramidLevels; j++) {
         //
         changeCTuple[j](x,y) = { changeC[j](x,y), lowpass1CCopy[j](x,y), lowpass2CCopy[j](x,y) };
 		changeSTuple[j](x,y) = { changeS[j](x,y), lowpass1SCopy[j](x,y), lowpass2SCopy[j](x,y) };
 		changeC2[j](x,y) = changeCTuple[j](x,y)[0];
 		changeS2[j](x,y) = changeSTuple[j](x,y)[0];
-
 
         // spatial Gaussian blur
 		float sigma = bandSigma[j];
@@ -238,9 +235,10 @@ RieszMagnifier::RieszMagnifier(int channels, Halide::Type type, int pyramidLevel
 
 	outGPyramidUpX = makeFuncArray(pyramidLevels, "outGPyramidUpX");
 	outGPyramid = makeFuncArray(pyramidLevels + 1, "outGPyramid");
-	outGPyramid[pyramidLevels](x,y) = lPyramid[pyramidLevels](x,y);
+	//outGPyramid[pyramidLevels](x,y) = lPyramid[pyramidLevels](x,y);
+	outGPyramid[pyramidLevels-1](x,y) = lPyramid[pyramidLevels-1](x,y);
 
-    for (int j=pyramidLevels-1; j>=0; j--) {
+    for (int j=pyramidLevels-2; j>=0; j--) {
 		outGPyramidUpX[j](x,y) = upsampleG5X(clipToEdges(outGPyramid[j + 1], scaleSize(input.width(), j + 1), scaleSize(input.height(), j + 1)))(x,y);
 		outGPyramid[j](x,y) = outLPyramid[j](x,y) + upsampleG5Y(outGPyramidUpX[j])(x,y);
 	}
@@ -305,8 +303,9 @@ void RieszMagnifier::schedule(bool tile)
         r2Pyramid[j]    .compute_root();
 
         lPyramidCopy[j] .compute_root();
+        lPyramid_orig[j].compute_root().split(y, y, yi, 8);
         lPyramid[j]     .compute_root().split(y, y, yi, 8);
-        lPyramidUpX[j]  .compute_at(lPyramid[j], y);
+        lPyramidUpX[j]  .compute_at(lPyramid_orig[j], y);
 
 		if (j>0) {
 			gPyramid[j]     .compute_root().split(y, y, yi, 8);
