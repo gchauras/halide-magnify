@@ -62,6 +62,9 @@ private:
     // Current frame modulo 2. (For circular buffer).
 	Halide::Param<int> pParam;
 
+    // Use amplitude stabilization or not
+	Halide::Param<int> stabilize;
+
 	// Funcs
 	std::vector<Halide::Func>
 		gPyramidDownX,
@@ -75,13 +78,7 @@ private:
 		r1Prev,
 		r2Pyramid,
 		r2Prev,
-		productReal,
-		productI,
-		productJ,
-		ijAmplitude,
-		amplitude,
-		phi,
-		qPhaseDiffC,
+        qPhaseDiffC,
 		qPhaseDiffS,
 		phaseC,
 		phaseS,
@@ -102,6 +99,7 @@ private:
 		changeC2,
 		changeS2,
 		amp,
+		ampPrev,
 		amp_orig,
 		changeCAmp,
 		changeCRegX,

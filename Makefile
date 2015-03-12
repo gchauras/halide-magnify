@@ -21,8 +21,17 @@ SRC := $(SRC_DIR)/EulerianMagnifier.cpp \
 	   $(SRC_DIR)/filter_util.cpp \
 	   $(SRC_DIR)/stdafx.cpp
 
+INC := $(SRC_DIR)/clock.h \
+	   $(SRC_DIR)/EulerianMagnifier.h \
+	   $(SRC_DIR)/filter_util.h \
+	   $(SRC_DIR)/NamedWindow.h \
+	   $(SRC_DIR)/RieszMagnifier.h \
+	   $(SRC_DIR)/stdafx.h \
+	   $(SRC_DIR)/targetver.h \
+	   $(SRC_DIR)/Util.h \
+	   $(SRC_DIR)/VideoApp.h
+
 OBJ := $(addprefix $(BUILD_DIR)/,$(notdir $(SRC:.cpp=.o)))
-INC := $(wildcard *.h)
 
 APP := phase_magnifier
 
@@ -34,9 +43,10 @@ LDFLAGS  += -lz -lpthread -ldl -lncurses -lopencv_core -lopencv_highgui
 $(APP): $(OBJ)
 	$(CXX) $(OBJ) $(HALIDE_LIB) $(LDFLAGS) -o $(APP)
 
-$(BUILD_DIR)/%.o: $(SRC_DIR)/%.cpp
+$(BUILD_DIR)/%.o: $(SRC_DIR)/%.cpp $(INC)
 	@$(MKDIR) $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 clean:
 	$(RM) $(OBJ) $(APP)
+
