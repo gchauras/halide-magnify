@@ -114,18 +114,19 @@ RieszMagnifier::RieszMagnifier(int channels, Halide::Type type, int pyramidLevel
 
         amp_orig [j](x,y) = hypot(clampedLPyramid(x,y), hypot(r1Pyramid_orig(x,y), r2Pyramid_orig(x,y))) + EPSILON;
         amp      [j](x,y) = select(stabilize==0, amp_orig[j](x,y), amplitudeBuffer[j](x,y));
-        r1Pyramid[j](x,y) = r1Pyramid_orig(x,y)  * (amp[j](x,y) / amp_orig[j](x,y));
-        r2Pyramid[j](x,y) = r2Pyramid_orig(x,y)  * (amp[j](x,y) / amp_orig[j](x,y));
-        lPyramid [j](x,y) = lPyramid_orig[j](x,y)* (amp[j](x,y) / amp_orig[j](x,y));
+        r1Pyramid[j](x,y) = r1Pyramid_orig(x,y)  * select(stabilize==0, 1.0f, amp[j](x,y)/amp_orig[j](x,y));
+        r2Pyramid[j](x,y) = r2Pyramid_orig(x,y)  * select(stabilize==0, 1.0f, amp[j](x,y)/amp_orig[j](x,y));
+        lPyramid [j](x,y) = lPyramid_orig[j](x,y)* select(stabilize==0, 1.0f, amp[j](x,y)/amp_orig[j](x,y));
 
         clampedLPyramidPrev(x,y,p) = clipToEdges(historyBuffer[j])(x,y,0,p);
         r1Prev [j](x,y) = coeff*(clampedLPyramidPrev(x+1,y,(pParam+1)%2) - clampedLPyramidPrev(x-1,y,(pParam+1)%2));
         r2Prev [j](x,y) = coeff*(clampedLPyramidPrev(x,y+1,(pParam+1)%2) - clampedLPyramidPrev(x,y-1,(pParam+1)%2));
-        ampPrev[j](x,y) = hypot(clampedLPyramidPrev(x,y,(pParam+1)%2), hypot(r1Prev[j](x,y), r2Prev[j](x,y))) + EPSILON;
+        ampPrev[j](x,y) = hypot(clampedLPyramidPrev(x,y,(pParam+1)%2), hypot(r1Prev[j](x,y), r2Prev[j](x,y)));
     }
     lPyramidCopy = copyPyramidToCircularBuffer(pyramidLevels, lPyramid, historyBuffer, 0, pParam, "lPyramidCopy");
 
     // quaternionic phase difference as a tuple
+    phi_diff    = makeFuncArray(pyramidLevels, "phi_diff");
     qPhaseDiffC = makeFuncArray(pyramidLevels, "qPhaseDiffC");
     qPhaseDiffS = makeFuncArray(pyramidLevels, "qPhaseDiffS");
 
@@ -138,21 +139,30 @@ RieszMagnifier::RieszMagnifier(int channels, Halide::Type type, int pyramidLevel
     qPhaseDiffS = makeFuncArray(pyramidLevels, "qPhaseDiffS");
 
     for (int j=0; j<pyramidLevels; j++) {
-        Func productReal, productI, productJ, ijAmplitude, amplitude, phi_diff;
+        Func productReal, productI, productJ, ijAmplitude, amplitude;
 
-        Expr a = ampPrev[j](x,y) / amp[j](x,y);
+        Expr a = 1.0f; //ampPrev[j](x,y);
+        Expr A = 1.0f; //amp[j](x,y);
 
-        productReal(x,y) = a * (lPyramidCopy[j](x,y) * historyBuffer[j](x,y, 0, (pParam+1)%2) + r1Pyramid[j](x,y) * r1Prev[j](x,y) + r2Pyramid[j](x,y) * r2Prev[j](x,y));
-        productI(x,y)    = a * (r1Pyramid[j](x,y)    * historyBuffer[j](x,y, 0, (pParam+1)%2) - r1Prev[j](x,y) * lPyramid[j](x,y));
-        productJ(x,y)    = a * (r2Pyramid[j](x,y)    * historyBuffer[j](x,y, 0, (pParam+1)%2) - r2Prev[j](x,y) * lPyramid[j](x,y));
+        Expr I  = select(A<3*EPSILON, 0.0f, lPyramidCopy[j](x,y)/A);
+        Expr R1 = select(A<3*EPSILON, 0.0f, r1Pyramid[j](x,y)   /A);
+        Expr R2 = select(A<3*EPSILON, 0.0f, r2Pyramid[j](x,y)   /A);
+
+        Expr i  = select(a<3*EPSILON, 0.0f, historyBuffer[j](x,y,0,(pParam+1)%2)/a);
+        Expr r1 = select(a<3*EPSILON, 0.0f, r1Prev[j](x,y)/a);
+        Expr r2 = select(a<3*EPSILON, 0.0f, r2Prev[j](x,y)/a);
+
+        productReal(x,y) = I*i + R1*r1 + R2*r2;
+        productI(x,y)    = R1*i - r1*I;
+        productJ(x,y)    = R2*i - r2*I;
 
         ijAmplitude(x,y) = hypot(productI(x,y),    productJ(x,y))    + EPSILON;
         amplitude  (x,y) = hypot(ijAmplitude(x,y), productReal(x,y)) + EPSILON;
 
-        phi_diff(x,y)    = acos(productReal(x,y) / amplitude(x,y)) / ijAmplitude(x,y);
+        phi_diff[j](x,y)    = acos(productReal(x,y) / amplitude(x,y)) / ijAmplitude(x,y);
 
-        qPhaseDiffC[j](x,y) = productI(x,y) * phi_diff(x,y);
-        qPhaseDiffS[j](x,y) = productJ(x,y) * phi_diff(x,y);
+        qPhaseDiffC[j](x,y) = productI(x,y) * phi_diff[j](x,y);
+        qPhaseDiffS[j](x,y) = productJ(x,y) * phi_diff[j](x,y);
     }
 
     // Cumulative sums on phi to give
@@ -248,7 +258,7 @@ RieszMagnifier::RieszMagnifier(int channels, Halide::Type type, int pyramidLevel
 		outGPyramid[j](x,y) = outLPyramid[j](x,y) + upsampleG5Y(outGPyramidUpX[j])(x,y);
 	}
 
-#if 1
+#if 0
     // YCrCb -> RGB
     floatOutput(x,y, c) = clamp(select(
     	c == 0, outGPyramid[0](x,y) + 1.402f * cr(x,y),
@@ -259,10 +269,7 @@ RieszMagnifier::RieszMagnifier(int channels, Halide::Type type, int pyramidLevel
             ? cast<unsigned char>(floatOutput(x,y,c)*255.0f)
             : floatOutput(x,y, c));
 #else
-    Expr  val = amp[0](x,y);
-    Tuple cmap = colormapBGR(val);
-
-    output(x,y,c) = select(c==0, cmap[0], select(c==1, cmap[1], cmap[2]));
+    output(x,y,c) = phi_diff[0](x,y);
 #endif
 }
 
@@ -501,7 +508,9 @@ void RieszMagnifier::bindJIT(
         float b1,
         float b2,
         float alpha,
-        vector<Image<float>> historyBuffer
+        int stabilize,
+        vector<Image<float>> historyBuffer,
+        vector<Image<float>> amplitudeBuffer
         )
 {
 	this->a1.set(a1);
@@ -510,9 +519,10 @@ void RieszMagnifier::bindJIT(
 	this->b1.set(b1);
 	this->b2.set(b2);
 	this->alpha.set(alpha);
-	this->stabilize.set(0);
+	this->stabilize.set(stabilize);
 	for (int j=0; j<pyramidLevels; j++) {
-		this->historyBuffer[j].set(historyBuffer[j]);
+		this->historyBuffer  [j].set(historyBuffer[j]);
+		this->amplitudeBuffer[j].set(amplitudeBuffer[j]);
     }
 }
 
@@ -524,23 +534,16 @@ void RieszMagnifier::process(Buffer frame, Buffer out)
 	frameCounter++;
 }
 
-void RieszMagnifier::compute_reference_amplitude(Buffer frame)
+void RieszMagnifier::compute_ref_amplitude(Buffer frame, vector<Image<float>> amplitudeBuff)
 {
     int width = frame.extent(0);
     int height= frame.extent(1);
 
     input.set(frame);
 
-    amplitudeBuffer_img.clear();
-    for (int i=0; i<pyramidLevels; i++) {
-        amplitudeBuffer_img.push_back(Image<float>(
-                    scaleSize(width,i), scaleSize(height,i)));
-    }
-
     cerr << "Computing reference amplitude ";
     for (int i=0; i<pyramidLevels; i++) {
-        amp_orig[i].realize(amplitudeBuffer_img[i]);
-        amplitudeBuffer[i].set(amplitudeBuffer_img[i]);
+        amp_orig[i].realize(amplitudeBuff[i]);
         cerr << ".";
     }
     cerr << " done" << endl;

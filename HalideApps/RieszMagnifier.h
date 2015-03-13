@@ -13,12 +13,14 @@ public:
             float b1,
             float b2,
             float alpha,
-            std::vector<Halide::Image<float>> historyBuffer);
+            int stabilize,
+            std::vector<Halide::Image<float>> historyBuffer,
+            std::vector<Halide::Image<float>> amplitudeBuffer);
 
     void process(Halide::Buffer frame, Halide::Buffer out);
 	void computeBandSigmas();
 
-    void compute_reference_amplitude(Halide::Buffer frame);
+    void compute_ref_amplitude(Halide::Buffer frame, std::vector<Halide::Image<float>> amplitudeBuff);
 	int getPyramidLevels();
 
 private:
@@ -78,6 +80,7 @@ private:
 		r1Prev,
 		r2Pyramid,
 		r2Prev,
+        phi_diff,
         qPhaseDiffC,
 		qPhaseDiffS,
 		phaseC,

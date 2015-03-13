@@ -122,12 +122,16 @@ cv::Mat toMat_reordered(Image<float> im)
 
 int main(int argc, char** argv) {
     bool   use_gui;
+    bool   stabilize;
+    float  stable_frame;
     string filename;
-    if (argc == 3) {
-        filename = argv[1];
-        use_gui  = (atoi(argv[2]) == 0);
+    if (argc == 4) {
+        filename    = argv[1];
+        stable_frame= (atof(argv[2]));
+        stabilize   = (stable_frame>0.0f && stable_frame<1.0f);
+        use_gui     = (atoi(argv[3]) == 0);
     } else {
-        cerr << "Usage: phase_magnifier [input video] [0|1 0 for using GUI, 1 to dump result in a video]" << endl;
+        cerr << "Usage: phase_magnifier [input video] [stable frame index between 0.0 and 1.0] [0|1 0 for using GUI, 1 to dump result in a video]" << endl;
         return EXIT_FAILURE;
     }
 
@@ -165,17 +169,23 @@ int main(int argc, char** argv) {
     }
 
 	std::vector<Image<float>> historyBuffer;
+	std::vector<Image<float>> amplitudeBuffer;
 	for (int i=0; i<magnifier.getPyramidLevels(); i++) {
 		historyBuffer.push_back(Image<float>(
                     scaleSize(app->width(), i),
-                    scaleSize(app->height(), i), 7, 2));
+                    scaleSize(app->height(),i), 7, 2));
+        amplitudeBuffer.push_back(Image<float>(
+                    scaleSize(app->width(), i),
+                    scaleSize(app->height(),i)));
     }
 
-    magnifier.bindJIT(filterA[1], filterA[2],
-            filterB[0], filterB[1], filterB[2], alpha, historyBuffer);
+    magnifier.bindJIT(filterA[1], filterA[2], filterB[0], filterB[1],
+            filterB[2], alpha, stabilize, historyBuffer, amplitudeBuffer);
 
     // select a reference amplitude frame
-    magnifier.compute_reference_amplitude(app->readFrame(0.5f));
+    if (stabilize) {
+        magnifier.compute_ref_amplitude(app->readFrame(stable_frame), amplitudeBuffer);
+    }
 
 	Image<float> frame;
 	Image<float> out(app->width(), app->height(), app->channels());
@@ -212,7 +222,8 @@ int main(int argc, char** argv) {
                 // Update fps
                 if (frameCounter % 10 == 0) {
                     filter_util::computeFilter(fps, freqCenter, freqWidth, filterA, filterB);
-                    magnifier.bindJIT((float)filterA[1], (float)filterA[2], (float)filterB[0], (float)filterB[1], (float)filterB[2], alpha, historyBuffer);
+                    magnifier.bindJIT(filterA[1], filterA[2], filterB[0], filterB[1],
+                            filterB[2], alpha, stabilize, historyBuffer, amplitudeBuffer);
                 }
             }
             else {
@@ -221,31 +232,31 @@ int main(int argc, char** argv) {
         }
 
         if ((pressedKey = cv::waitKey(30)) >= 0) {
-            if (pressedKey == 45)	// minus
-            {
+            if (pressedKey == 45) {	        // minus
                 freqCenter = std::max(freqWidth, freqCenter - 0.5);
                 cerr << "Freq center is now " << freqCenter << endl;
                 filter_util::computeFilter(fps, freqCenter, freqWidth, filterA, filterB);
-                magnifier.bindJIT((float)filterA[1], (float)filterA[2], (float)filterB[0], (float)filterB[1], (float)filterB[2], alpha, historyBuffer);
+                magnifier.bindJIT(filterA[1], filterA[2], filterB[0], filterB[1],
+                        filterB[2], alpha, stabilize, historyBuffer, amplitudeBuffer);
             }
-            else if (pressedKey == 43)	// plus
-            {
+            else if (pressedKey == 43) {	// plus
                 freqCenter += 0.5;
                 cerr << "Freq center is now " << freqCenter << endl;
                 filter_util::computeFilter(fps, freqCenter, freqWidth, filterA, filterB);
-                magnifier.bindJIT((float)filterA[1], (float)filterA[2], (float)filterB[0], (float)filterB[1], (float)filterB[2], alpha, historyBuffer);
+                magnifier.bindJIT(filterA[1], filterA[2], filterB[0], filterB[1],
+                        filterB[2], alpha, stabilize, historyBuffer, amplitudeBuffer);
             }
-            else if (pressedKey == 97)	// a: decrease alpha
-            {
+            else if (pressedKey == 97) {	// a: decrease alpha
                 alpha += 10;
                 cerr << "Alpha is now " << alpha << endl;
-                magnifier.bindJIT((float)filterA[1], (float)filterA[2], (float)filterB[0], (float)filterB[1], (float)filterB[2], alpha, historyBuffer);
+                magnifier.bindJIT(filterA[1], filterA[2], filterB[0], filterB[1],
+                        filterB[2], alpha, stabilize, historyBuffer, amplitudeBuffer);
             }
-            else if (pressedKey == 65)	// A: increase alpha
-            {
+            else if (pressedKey == 65) {    // A: increase alpha
                 alpha += 10;
                 cerr << "Alpha is now " << alpha << endl;
-                magnifier.bindJIT((float)filterA[1], (float)filterA[2], (float)filterB[0], (float)filterB[1], (float)filterB[2], alpha, historyBuffer);
+                magnifier.bindJIT(filterA[1], filterA[2], filterB[0], filterB[1],
+                        filterB[2], alpha, stabilize, historyBuffer, amplitudeBuffer);
             }
             else if (pressedKey == 32) {
                 paused = !paused;
