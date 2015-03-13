@@ -141,23 +141,20 @@ RieszMagnifier::RieszMagnifier(int channels, Halide::Type type, int pyramidLevel
     for (int j=0; j<pyramidLevels; j++) {
         Func productReal, productI, productJ, ijAmplitude, amplitude;
 
-        Expr a = 1.0f; //ampPrev[j](x,y);
-        Expr A = 1.0f; //amp[j](x,y);
+        Expr I  = lPyramidCopy[j](x,y);                 // quaternion of current frame
+        Expr R1 = r1Pyramid[j](x,y);
+        Expr R2 = r2Pyramid[j](x,y);
 
-        Expr I  = select(A<3*EPSILON, 0.0f, lPyramidCopy[j](x,y)/A);
-        Expr R1 = select(A<3*EPSILON, 0.0f, r1Pyramid[j](x,y)   /A);
-        Expr R2 = select(A<3*EPSILON, 0.0f, r2Pyramid[j](x,y)   /A);
+        Expr i  = historyBuffer[j](x,y,0,(pParam+1)%2);// quaternion of previous frame
+        Expr r1 = r1Prev[j](x,y);
+        Expr r2 = r2Prev[j](x,y);
 
-        Expr i  = select(a<3*EPSILON, 0.0f, historyBuffer[j](x,y,0,(pParam+1)%2)/a);
-        Expr r1 = select(a<3*EPSILON, 0.0f, r1Prev[j](x,y)/a);
-        Expr r2 = select(a<3*EPSILON, 0.0f, r2Prev[j](x,y)/a);
+        productReal(x,y) = I*i + R1*r1 + R2*r2;     // A*A_prev*cos(phi-phi_prev)
+        productI(x,y)    = R1*i - r1*I;             // A*A_prev*sin(phi-phi_prev)*cos(theta)
+        productJ(x,y)    = R2*i - r2*I;             // A*A_prev*sin(phi-phi_prev)*sin(theta)
 
-        productReal(x,y) = I*i + R1*r1 + R2*r2;
-        productI(x,y)    = R1*i - r1*I;
-        productJ(x,y)    = R2*i - r2*I;
-
-        ijAmplitude(x,y) = hypot(productI(x,y),    productJ(x,y))    + EPSILON;
-        amplitude  (x,y) = hypot(ijAmplitude(x,y), productReal(x,y)) + EPSILON;
+        ijAmplitude(x,y) = hypot(productI(x,y),    productJ(x,y))    + EPSILON;     // A*A_prev*sin(phi-phi_prev)
+        amplitude  (x,y) = hypot(ijAmplitude(x,y), productReal(x,y)) + EPSILON;     // A*A_prev
 
         phi_diff[j](x,y)    = acos(productReal(x,y) / amplitude(x,y)) / ijAmplitude(x,y);
 
